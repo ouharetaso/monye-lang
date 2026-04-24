@@ -1,13 +1,14 @@
 use std::str::{Chars, FromStr};
 use std::iter::Peekable;
+use std::collections::VecDeque;
 
 
 pub trait Lexer<'a> {
-    fn lex(&mut self) -> Result<Vec<Token>, LexError>;
+    fn lex(&mut self) -> Result<VecDeque<Token>, LexError>;
 }
 
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum Token {
     Number(isize),
     Keyword(Keyword),
@@ -17,6 +18,8 @@ pub enum Token {
     RParen,
     LBrace,
     RBrace,
+    Comma,
+    Dot,
     Colon,
     Semicolon,
     VBar,
@@ -25,6 +28,7 @@ pub enum Token {
     Minus,
     Asterisk,
     Slash,
+    Percent,
     Equal,
     Arrow,
     EOF
@@ -91,8 +95,8 @@ impl PrimitiveType {
 
     fn as_str(&self) -> &'static str {
         match self {
-            PrimitiveType::I8 => "u8",
-            PrimitiveType::U8 => "i8",
+            PrimitiveType::I8 => "i8",
+            PrimitiveType::U8 => "u8",
             PrimitiveType::I16 => "i16",
             PrimitiveType::U16 => "u16",
             PrimitiveType::I32 => "i32",
@@ -118,12 +122,26 @@ impl std::str::FromStr for PrimitiveType {
 
 
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone)]
 pub enum LexError {
     UnsupportedToken,
     UnknownKeyword,
     ParseNumberError
 }
+
+
+impl std::fmt::Display for LexError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LexError::UnsupportedToken => write!(f, "Unsupported token"),
+            LexError::UnknownKeyword => write!(f, "Unknown keyword"),
+            LexError::ParseNumberError => write!(f, "Failed to parse number"),
+        }
+    }
+}
+
+
+impl std::error::Error for LexError {}
 
 
 pub struct StringLexer<'a> {
@@ -132,7 +150,7 @@ pub struct StringLexer<'a> {
 
 
 impl<'a> StringLexer<'a> {
-    fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str) -> Self {
         Self {
             chars: input.chars().peekable()
         }
@@ -155,6 +173,8 @@ impl<'a> StringLexer<'a> {
                 ')' => Ok(Token::RParen),
                 '{' => Ok(Token::LBrace),
                 '}' => Ok(Token::RBrace),
+                ',' => Ok(Token::Comma),
+                '.' => Ok(Token::Dot),
                 ':' => Ok(Token::Colon),
                 ';' => Ok(Token::Semicolon),
                 '&' => Ok(Token::Ampersand),
@@ -162,10 +182,16 @@ impl<'a> StringLexer<'a> {
                 '+' => Ok(Token::Plus),
                 '*' => Ok(Token::Asterisk),
                 '/' => Ok(Token::Slash),
+                '%' => Ok(Token::Percent),
                 '=' => Ok(Token::Equal),
                 '-' => {
-                    match self.chars.next() {
-                        Some('>') => Ok(Token::Arrow),
+                    match self.chars.peek() {
+                        Some('>') => {
+                            self.chars.next();
+                            Ok(Token::Arrow)
+                        },
+                        // doesn't parse minus values at tokenize time
+                        /* 
                         Some('0') => {
                             match self.chars.peek() {
                                 Some('0'..'9') => Err(LexError::ParseNumberError),
@@ -181,6 +207,7 @@ impl<'a> StringLexer<'a> {
 
                             Ok(Token::Number(digits.parse().map_err(|_|LexError::ParseNumberError)?))
                         },
+                        */
                         _ => Ok(Token::Minus)
                     }
                 },
@@ -225,18 +252,18 @@ impl<'a> StringLexer<'a> {
 
 
 impl<'a> Lexer<'a> for StringLexer<'a> {
-    fn lex(&mut self) -> Result<Vec<Token>, LexError> {
-        let mut result = Vec::new();
+    fn lex(&mut self) -> Result<VecDeque<Token>, LexError> {
+        let mut result = VecDeque::new();
 
         loop {
             let token = self.next_token()?;
 
             if token == Token::EOF {
-                result.push(Token::EOF);
+                result.push_back(Token::EOF);
                 break;
             }
             else {
-                result.push(token)
+                result.push_back(token)
             }
         }
 
@@ -293,7 +320,8 @@ mod tests {
             (
                 "-42",
                 Ok(vec![
-                    Token::Number(-42),
+                    Token::Minus,
+                    Token::Number(42),
                     Token::EOF
                 ])
             ),
@@ -310,7 +338,7 @@ mod tests {
 
         for (input, expect) in patterns {
             let mut lexer = StringLexer::new(input);
-            assert_eq!(lexer.lex(), expect);
+            assert_eq!(lexer.lex(), expect.map(|v| v.into()));
         }
     }
 }

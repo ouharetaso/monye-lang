@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 
 use crate::lexer::{
     Token::{self, *},
-    PrimitiveType::{self, *},
-    Keyword::{self, *}
+    PrimitiveType,
+    Keyword::*
 };
 
 

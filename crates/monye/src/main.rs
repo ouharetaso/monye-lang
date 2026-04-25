@@ -1,4 +1,4 @@
-use chibi_script::{
+use monye_syntax::{
     lexer::*,
     parser::*,
 };

@@ -1,0 +1,7 @@
+[package]
+name = "monye"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+monye-syntax.workspace = true

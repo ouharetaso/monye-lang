@@ -3,5 +3,12 @@
 version = 4
 
 [[package]]
-name = "chibi-script"
+name = "monye"
+version = "0.1.0"
+dependencies = [
+ "monye-syntax",
+]
+
+[[package]]
+name = "monye-syntax"
 version = "0.1.0"

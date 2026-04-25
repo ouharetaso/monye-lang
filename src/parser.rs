@@ -12,7 +12,7 @@ type Ident = String;
 
 
 #[derive(Clone, Debug)]
-pub struct Program(Vec<Declaration>);
+pub struct Program(pub Vec<Declaration>);
 
 
 #[derive(Clone, Debug)]

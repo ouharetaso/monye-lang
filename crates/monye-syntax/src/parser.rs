@@ -247,7 +247,7 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Vec<Spanned<Statement>>, ParseE
 
 
 fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseError> {
-    let result = match peek(tokens)? {
+    match peek(tokens)? {
         Token(Keyword(Let), _) => Ok(bind(tokens)?),
         Token(
             Identifier(_) | Minus | Number(_) | LParen,
@@ -259,8 +259,7 @@ fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseEr
             Ok(Spanned(Statement::Expression(spanned_expr), Span(span_start.0, end)))
         },
         Token(_, span) => Err(ParseError::UnexpectedToken(span)),
-    };
-    result
+    }
 }
 
 
@@ -330,7 +329,7 @@ fn addition(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
     let mut lhs = multiply(tokens)?;
     let Span(start, mut end) = lhs.1;
 
-    while [Plus, Minus].into_iter().any(|t| Ok(t) == peek(tokens).map(|tt|tt.0)) {
+    while let Token(Plus | Minus, _) = peek(tokens)? {
         match peek(tokens)? {
             Token(Plus, _) => {
                 consume(tokens, Plus)?;
@@ -369,7 +368,7 @@ fn multiply(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
     let mut lhs = unary_op(tokens)?;
     let Span(start, mut end) = lhs.1;
 
-    while [Asterisk, Slash, Percent].into_iter().any(|t| Ok(t) == peek(tokens).map(|tt|tt.0)) {
+    while let Token(Asterisk | Slash | Percent, _) = peek(tokens)? {
         match peek(tokens)? {
             Token(Asterisk, _) => {
                 consume(tokens, Asterisk)?;

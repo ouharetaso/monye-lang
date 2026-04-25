@@ -2,7 +2,9 @@ use std::collections::VecDeque;
 
 
 use crate::lexer::{
-    Token::{self, *},
+    Token,
+    TokenKind::{self, *},
+    Span,
     PrimitiveType,
     Keyword::*
 };
@@ -86,7 +88,7 @@ pub enum UniOp {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ParseError {
-    UnexpectedToken,
+    UnexpectedToken(Span),
     UnexpectedEOF
 }
 
@@ -94,7 +96,7 @@ pub enum ParseError {
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ParseError::UnexpectedToken => write!(f, "unexpected token"),
+            ParseError::UnexpectedToken(span) => write!(f, "unexpected token at : {}-{}", span.0, span.1),
             ParseError::UnexpectedEOF => write!(f, "unexpected end of file"),
         }
     }
@@ -104,12 +106,17 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 
-fn consume(tokens: &mut VecDeque<Token>, expect: Token) -> Result<(), ParseError> {
-    if tokens.pop_front() == Some(expect) {
-        Ok(())
+fn consume(tokens: &mut VecDeque<Token>, expect: TokenKind) -> Result<(), ParseError> {
+    if let Some(Token(actual, span)) = tokens.pop_front()  {
+        if expect == actual {
+            Ok(())
+        }
+        else {
+            Err(ParseError::UnexpectedToken(span))
+        }
     }
     else {
-        Err(ParseError::UnexpectedToken)
+        Err(ParseError::UnexpectedEOF)
     }
 }
 
@@ -128,7 +135,7 @@ pub fn parse(tokens: &mut VecDeque<Token>) -> Result<Program, ParseError> {
     let mut program = Vec::new();
     loop {
         program.push(fn_decl(tokens)?);
-        if peek(tokens)? == EOF {
+        if peek(tokens)?.0 == EOF {
             break;
         }
     }
@@ -140,8 +147,9 @@ pub fn parse(tokens: &mut VecDeque<Token>) -> Result<Program, ParseError> {
 
 fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
     consume(tokens, Keyword(Fn))?;
-    let Identifier(name) = next(tokens)? else {
-        return Err(ParseError::UnexpectedToken);
+    let name = match next(tokens)? {
+        Token(Identifier(name), _) => name,
+        Token(_, span) => return Err(ParseError::UnexpectedToken(span))
     };
     consume(tokens, LParen)?;
     let params = param_list(tokens)?;
@@ -162,19 +170,20 @@ fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
 fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Ident, TypeName)>, ParseError> {
     let mut result = Vec::new();
     
-    if peek(tokens)? == Comma {
-        return Err(ParseError::UnexpectedToken);
+    let Token(kind, span) = peek(tokens)?;
+    if kind == Comma {
+        return Err(ParseError::UnexpectedToken(span));
     }
 
     loop {
         match peek(tokens)? {
-            Identifier(_) => result.push(typed_binding(tokens)?),
-            Comma => {
+            Token(Identifier(_), _) => result.push(typed_binding(tokens)?),
+            Token(Comma, _) => {
                 consume(tokens, Comma)?;
                 continue;
             },
-            RParen => break,
-            _ => return Err(ParseError::UnexpectedToken)
+            Token(RParen, _) => break,
+            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
         }
     }
     Ok(result)
@@ -182,9 +191,12 @@ fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Ident, TypeName)>, Pa
 
 
 fn typed_binding(tokens: &mut VecDeque<Token>) -> Result<(Ident, TypeName), ParseError> {
-    let Identifier(name) = next(tokens)? else {
-        return Err(ParseError::UnexpectedToken);
+    let Token(kind, span) = next(tokens)?;
+
+    let Identifier(name) = kind else {
+        return Err(ParseError::UnexpectedToken(span));
     };
+
     consume(tokens, Colon)?;
     let ty = type_name(tokens)?;
     Ok((name, ty))
@@ -193,9 +205,9 @@ fn typed_binding(tokens: &mut VecDeque<Token>) -> Result<(Ident, TypeName), Pars
 
 fn type_name(tokens: &mut VecDeque<Token>) -> Result<TypeName, ParseError> {
     match next(tokens)? {
-        Type(ty) => Ok(TypeName::Primitive(ty)),
+        Token(Type(ty), _) => Ok(TypeName::Primitive(ty)),
         //Identifier(ident) => Ok(TypeName::UserDefined(ident)),
-        _ => Err(ParseError::UnexpectedToken),
+        Token(_, span) => Err(ParseError::UnexpectedToken(span)),
     }
 }
 
@@ -207,9 +219,12 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Vec<Statement>, ParseError> {
 
     loop {
         match peek(tokens)? {
-            Keyword(Let) | LParen | Minus | Identifier(_) | Number(_) => {
+            Token(
+                Keyword(Let) | LParen | Minus | Identifier(_) | Number(_),
+                _span
+            ) => {
                 result.push(statement(tokens)?);
-                if peek(tokens)? == Semicolon {
+                if peek(tokens)?.0 == Semicolon {
                     consume(tokens, Semicolon)?;
                     continue;
                 }
@@ -217,8 +232,8 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Vec<Statement>, ParseError> {
                     break
                 }
             },
-            RBrace => break,
-            _ => return Err(ParseError::UnexpectedToken)
+            Token(RBrace, _span) => break,
+            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
         }
     }
     consume(tokens, RBrace)?;
@@ -229,11 +244,14 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Vec<Statement>, ParseError> {
 
 fn statement(tokens: &mut VecDeque<Token>) -> Result<Statement, ParseError> {
     let result = match peek(tokens)? {
-        Keyword(Let) => Ok(bind(tokens)?),
-        Identifier(_) | Minus | Number(_) | LParen => {
+        Token(Keyword(Let), _) => Ok(bind(tokens)?),
+        Token(
+            Identifier(_) | Minus | Number(_) | LParen,
+            _
+        ) => {
             Ok(Statement::Expression(assign(tokens)?))
         },
-        _ => Err(ParseError::UnexpectedToken),
+        Token(_, span) => Err(ParseError::UnexpectedToken(span)),
     };
     result
 }
@@ -242,7 +260,7 @@ fn statement(tokens: &mut VecDeque<Token>) -> Result<Statement, ParseError> {
 fn bind(tokens: &mut VecDeque<Token>) -> Result<Statement, ParseError> {
     consume(tokens, Keyword(Let))?;
     let (name, ty) = typed_binding(tokens)?;
-    let initializer = if peek(tokens)? == Equal {
+    let initializer = if peek(tokens)?.0 == Equal {
         consume(tokens, Equal)?;
         Some(expr(tokens)?)
     }
@@ -266,7 +284,7 @@ fn expr(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
 fn assign(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
     let lhs = operation(tokens)?;
 
-    if peek(tokens)? == Equal {
+    if peek(tokens)?.0 == Equal {
         consume(tokens, Equal)?;
         Ok(Expression::Assign {
             lhs: Box::new(lhs),
@@ -287,9 +305,9 @@ fn operation(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
 fn addition(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
     let mut lhs = multiply(tokens)?;
 
-    while [Plus, Minus].into_iter().any(|t| Ok(t) == peek(tokens)) {
+    while [Plus, Minus].into_iter().any(|t| Ok(t) == peek(tokens).map(|tt|tt.0)) {
         match peek(tokens)? {
-            Plus => {
+            Token(Plus, _) => {
                 consume(tokens, Plus)?;
                 let rhs = multiply(tokens)?;
                 lhs = Expression::BinOp {
@@ -298,7 +316,7 @@ fn addition(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
                     op: BinOp::Add
                 };
             },
-            Minus => {
+            Token(Minus, _) => {
                 consume(tokens, Minus)?;
                 let rhs = multiply(tokens)?;
                 lhs = Expression::BinOp {
@@ -317,9 +335,9 @@ fn addition(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
 fn multiply(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
     let mut lhs = unary_op(tokens)?;
 
-    while [Asterisk, Slash, Percent].into_iter().any(|t| Ok(t) == peek(tokens)) {
+    while [Asterisk, Slash, Percent].into_iter().any(|t| Ok(t) == peek(tokens).map(|tt|tt.0)) {
         match peek(tokens)? {
-            Asterisk => {
+            Token(Asterisk, _) => {
                 consume(tokens, Asterisk)?;
                 let rhs = unary_op(tokens)?;
                 lhs = Expression::BinOp {
@@ -328,7 +346,7 @@ fn multiply(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
                     op: BinOp::Mul
                 };
             },
-            Slash => {
+            Token(Slash, _) => {
                 consume(tokens, Slash)?;
                 let rhs = unary_op(tokens)?;
                 lhs = Expression::BinOp {
@@ -337,7 +355,7 @@ fn multiply(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
                     op: BinOp::Div
                 };
             },
-            Percent => {
+            Token(Percent, _) => {
                 consume(tokens, Percent)?;
                 let rhs = unary_op(tokens)?;
                 lhs = Expression::BinOp {
@@ -354,7 +372,7 @@ fn multiply(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
 
 
 fn unary_op(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
-    if peek(tokens)? == Minus {
+    if peek(tokens)?.0 == Minus {
         consume(tokens, Minus)?;
         Ok(Expression::UniOp{
             operand: Box::new(factor(tokens)?),
@@ -369,44 +387,48 @@ fn unary_op(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
 
 fn factor(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
     match peek(tokens)? {
-        Number(n) => {
+        Token(Number(n), _) => {
             next(tokens)?;
             Ok(Expression::Number(n))
         },
-        LParen => {
+        Token(LParen, _) => {
             consume(tokens, LParen)?;
             let expr = expr(tokens)?;
             consume(tokens, RParen)?;
             Ok(expr)
         }
-        Identifier(_) => fn_call(tokens),
-        _ => Err(ParseError::UnexpectedToken)
+        Token(Identifier(_), _) => fn_call(tokens),
+        Token(_, span) => Err(ParseError::UnexpectedToken(span))
     }
 }
 
 
 fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Expression, ParseError> {
-    let Identifier(ident) = next(tokens)? else {
-        return Err(ParseError::UnexpectedToken)
+    let Token(kind, span) = next(tokens)?;
+    let Identifier(ident) = kind else {
+        return Err(ParseError::UnexpectedToken(span))
     };
 
-    if peek(tokens)? == LParen {
+    if peek(tokens)?.0 == LParen {
         let mut args = Vec::new();
         consume(tokens, LParen)?;
-        if peek(tokens)? == Comma {
-            return Err(ParseError::UnexpectedToken);
+        if peek(tokens)?.0 == Comma {
+            return Err(ParseError::UnexpectedToken(next(tokens)?.1));
         }
         loop {
             match peek(tokens)? {
-                RParen => break,
-                LParen | Number(_) | Identifier(_) | Minus => {
+                Token(RParen, _) => break,
+                Token(
+                    LParen | Number(_) | Identifier(_) | Minus,
+                    _
+                ) => {
                     args.push(expr(tokens)?);
                 },
-                Comma => {
+                Token(Comma, _) => {
                     consume(tokens, Comma)?;
                     continue;
                 }
-                _ => return Err(ParseError::UnexpectedToken)
+                Token(_, span) => return Err(ParseError::UnexpectedToken(span))
             }
         }
         consume(tokens, RParen)?;

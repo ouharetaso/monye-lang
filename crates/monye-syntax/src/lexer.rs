@@ -1,4 +1,4 @@
-use std::str::{Chars, FromStr};
+use std::str::{CharIndices, FromStr};
 use std::iter::Peekable;
 use std::collections::VecDeque;
 
@@ -8,8 +8,22 @@ pub trait Lexer<'a> {
 }
 
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Span(pub usize, pub usize);
+
+
+#[derive(Debug, Clone)]
+pub struct Token(pub TokenKind, pub Span);
+
+impl PartialEq for Token {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+
 #[derive(PartialEq, Debug, Clone)]
-pub enum Token {
+pub enum TokenKind {
     Number(isize),
     Keyword(Keyword),
     Identifier(String),
@@ -33,6 +47,7 @@ pub enum Token {
     Arrow,
     EOF
 }
+
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum Keyword {
@@ -145,108 +160,104 @@ impl std::error::Error for LexError {}
 
 
 pub struct StringLexer<'a> {
-    chars: Peekable<Chars<'a>>
+    char_indices: Peekable<CharIndices<'a>>
 }
 
 
 impl<'a> StringLexer<'a> {
     pub fn new(input: &'a str) -> Self {
         Self {
-            chars: input.chars().peekable()
+            char_indices: input.char_indices().peekable()
         }
     }
 
     fn next_token(&mut self) -> Result<Token, LexError> {
-        while let Some(&c) = self.chars.peek() {
+        while let Some(&(_i, c)) = self.char_indices.peek() {
             if c.is_ascii_whitespace() {
-                self.chars.next();
+                self.char_indices.next();
                 continue;
             }
             else {
                 break;
             }
         }
-
-        if let Some(c) = self.chars.next() {
+        let mut start = 0;
+        let mut len = 0;
+        let kind = if let Some((i, c)) = self.char_indices.next() {
+            start = i;
+            len = c.len_utf8();
             match c {
-                '(' => Ok(Token::LParen),
-                ')' => Ok(Token::RParen),
-                '{' => Ok(Token::LBrace),
-                '}' => Ok(Token::RBrace),
-                ',' => Ok(Token::Comma),
-                '.' => Ok(Token::Dot),
-                ':' => Ok(Token::Colon),
-                ';' => Ok(Token::Semicolon),
-                '&' => Ok(Token::Ampersand),
-                '|' => Ok(Token::VBar),
-                '+' => Ok(Token::Plus),
-                '*' => Ok(Token::Asterisk),
-                '/' => Ok(Token::Slash),
-                '%' => Ok(Token::Percent),
-                '=' => Ok(Token::Equal),
+                '(' => TokenKind::LParen,
+                ')' => TokenKind::RParen,
+                '{' => TokenKind::LBrace,
+                '}' => TokenKind::RBrace,
+                ',' => TokenKind::Comma,
+                '.' => TokenKind::Dot,
+                ':' => TokenKind::Colon,
+                ';' => TokenKind::Semicolon,
+                '&' => TokenKind::Ampersand,
+                '|' => TokenKind::VBar,
+                '+' => TokenKind::Plus,
+                '*' => TokenKind::Asterisk,
+                '/' => TokenKind::Slash,
+                '%' => TokenKind::Percent,
+                '=' => TokenKind::Equal,
                 '-' => {
-                    match self.chars.peek() {
-                        Some('>') => {
-                            self.chars.next();
-                            Ok(Token::Arrow)
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '>')) => {
+                            self.char_indices.next();
+                            len += '>'.len_utf8();
+                            TokenKind::Arrow
                         },
-                        // doesn't parse minus values at tokenize time
-                        /* 
-                        Some('0') => {
-                            match self.chars.peek() {
-                                Some('0'..'9') => Err(LexError::ParseNumberError),
-                                _ => Ok(Token::Number(-0))
-                            }
-                        },
-                        first @ Some('1'..='9') =>  {
-                            let digits = std::iter::once('-')
-                                .chain(std::iter::successors(first, |_|{
-                                    self.chars.next_if(|c| c.is_numeric())
-                                }))
-                                .collect::<String>();
-
-                            Ok(Token::Number(digits.parse().map_err(|_|LexError::ParseNumberError)?))
-                        },
-                        */
-                        _ => Ok(Token::Minus)
+                        _ => TokenKind::Minus
                     }
                 },
                 '0' => {
-                    match self.chars.peek() {
-                        Some('0'..'9') => Err(LexError::ParseNumberError),
-                        _ => Ok(Token::Number(0))
+                    match self.char_indices.peek() {
+                        Some((_ii, '0'..'9')) => return Err(LexError::ParseNumberError),
+                        _ => TokenKind::Number(0)
                     }
                 },
                 first @ '1'..='9' => {
                     let digits = std::iter::successors(Some(first), |_|{
-                        self.chars.next_if(|c| c.is_numeric())
+                        self.char_indices.next_if(|&(_, c)|{
+                            c.is_numeric()
+                        })
+                        .map(|(_, c)| c)
                     })
                     .collect::<String>();
-
-                    Ok(Token::Number(digits.parse().map_err(|_|LexError::ParseNumberError)?))
+                    len = digits.len();
+                    TokenKind::Number(digits.parse().map_err(|_|LexError::ParseNumberError)?)
                 }
                 first @ ('a'..='z' | 'A'..='Z' | '_') => {
                     let identifier = std::iter::successors(Some(first), |_|{
-                        self.chars.next_if(|&c| c.is_alphanumeric() || c == '_')
+                        self.char_indices.next_if(|&(_, c)| {
+                            c.is_alphanumeric() || c == '_'
+                        })
+                        .map(|(_, c)| c)
                     })
                     .collect::<String>();
-                    
+
+                    len = identifier.len();
+
                     if let Ok(keyword) = Keyword::from_str(&identifier) {
-                        Ok(Token::Keyword(keyword))
+                        TokenKind::Keyword(keyword)
                     }
                     else if let Ok(ty) = PrimitiveType::from_str(&identifier) {
-                        Ok(Token::Type(ty))
+                        TokenKind::Type(ty)
                     } 
                     else {
-                        Ok(Token::Identifier(identifier))
+                        TokenKind::Identifier(identifier)
                     }
                 },
-                _ => Err(LexError::UnsupportedToken)
+                _ => return Err(LexError::UnsupportedToken)
             }
         }
         else {
-            Ok(Token::EOF)
-        }
+            TokenKind::EOF
+        };
+
+        Ok(Token(kind, Span(start, start + len)))
     }
 }
 
@@ -258,12 +269,12 @@ impl<'a> Lexer<'a> for StringLexer<'a> {
         loop {
             let token = self.next_token()?;
 
-            if token == Token::EOF {
-                result.push_back(Token::EOF);
+            result.push_back(token.clone());
+            if token.0 == TokenKind::EOF {
                 break;
             }
             else {
-                result.push_back(token)
+                continue;
             }
         }
 
@@ -276,69 +287,95 @@ impl<'a> Lexer<'a> for StringLexer<'a> {
 mod tests {
     use super::*;
 
+    fn get_token_kinds(input: &str) -> Result<Vec<TokenKind>, LexError> {
+        let mut lexer = StringLexer::new(input);
+        lexer.lex().map(|tokens| tokens.into_iter().map(|t| t.0).collect())
+    }
+
     #[test]
     fn test_lex_symbols() {
-        let input = ":(){ :|:& };:";
-        let mut lexer = StringLexer::new(input);
+        let input = ":(){ :|:& };: -> -";
         let expect = vec![
-            Token::Colon,
-            Token::LParen,
-            Token::RParen,
-            Token::LBrace,
-            Token::Colon,
-            Token::VBar,
-            Token::Colon,
-            Token::Ampersand,
-            Token::RBrace,
-            Token::Semicolon,
-            Token::Colon,
-            Token::EOF
+            TokenKind::Colon,
+            TokenKind::LParen,
+            TokenKind::RParen,
+            TokenKind::LBrace,
+            TokenKind::Colon,
+            TokenKind::VBar,
+            TokenKind::Colon,
+            TokenKind::Ampersand,
+            TokenKind::RBrace,
+            TokenKind::Semicolon,
+            TokenKind::Colon,
+            TokenKind::Arrow,
+            TokenKind::Minus,
+            TokenKind::EOF
         ];
 
-        let Ok(tokens) = lexer.lex() else { panic!() };
-
-        assert_eq!(tokens, expect);
+        assert_eq!(get_token_kinds(input).unwrap(), expect);
     }
 
     #[test]
     fn test_lex_number() {
         let patterns = vec![
-            (
-                "32767",
-                Ok(vec![
-                    Token::Number(32767),
-                    Token::EOF
-                ])
-            ),
-            (
-                "0",
-                Ok(vec![
-                    Token::Number(0),
-                    Token::EOF
-                ])
-            ),
-            (
-                "-42",
-                Ok(vec![
-                    Token::Minus,
-                    Token::Number(42),
-                    Token::EOF
-                ])
-            ),
-            (
-                "042",
-                Err(LexError::ParseNumberError)
-            ),
-            (
-                "-042",
-                Err(LexError::ParseNumberError)
-            ),
+            ("32767", Ok(vec![TokenKind::Number(32767), TokenKind::EOF])),
+            ("0", Ok(vec![TokenKind::Number(0), TokenKind::EOF])),
+            ("-42", Ok(vec![TokenKind::Minus, TokenKind::Number(42), TokenKind::EOF])),
+            ("042", Err(LexError::ParseNumberError)),
+            ("-042", Err(LexError::ParseNumberError)),
         ];
 
-
         for (input, expect) in patterns {
-            let mut lexer = StringLexer::new(input);
-            assert_eq!(lexer.lex(), expect.map(|v| v.into()));
+            assert_eq!(get_token_kinds(input), expect);
         }
+    }
+
+    #[test]
+    fn test_lex_identifiers_and_keywords() {
+        let input = "fn main let i32 u64 _variable_name";
+        let expect = vec![
+            TokenKind::Keyword(Keyword::Fn),
+            TokenKind::Identifier("main".to_string()),
+            TokenKind::Keyword(Keyword::Let),
+            TokenKind::Type(PrimitiveType::I32),
+            TokenKind::Type(PrimitiveType::U64),
+            TokenKind::Identifier("_variable_name".to_string()),
+            TokenKind::EOF,
+        ];
+
+        assert_eq!(get_token_kinds(input).unwrap(), expect);
+    }
+
+    #[test]
+    fn test_lex_complex() {
+        let input = "fn add(a: i32, b: i32) -> i32 { let sum = a + b; sum }";
+        let expect = vec![
+            TokenKind::Keyword(Keyword::Fn),
+            TokenKind::Identifier("add".to_string()),
+            TokenKind::LParen,
+            TokenKind::Identifier("a".to_string()),
+            TokenKind::Colon,
+            TokenKind::Type(PrimitiveType::I32),
+            TokenKind::Comma,
+            TokenKind::Identifier("b".to_string()),
+            TokenKind::Colon,
+            TokenKind::Type(PrimitiveType::I32),
+            TokenKind::RParen,
+            TokenKind::Arrow,
+            TokenKind::Type(PrimitiveType::I32),
+            TokenKind::LBrace,
+            TokenKind::Keyword(Keyword::Let),
+            TokenKind::Identifier("sum".to_string()),
+            TokenKind::Equal,
+            TokenKind::Identifier("a".to_string()),
+            TokenKind::Plus,
+            TokenKind::Identifier("b".to_string()),
+            TokenKind::Semicolon,
+            TokenKind::Identifier("sum".to_string()),
+            TokenKind::RBrace,
+            TokenKind::EOF,
+        ];
+
+        assert_eq!(get_token_kinds(input).unwrap(), expect);
     }
 }

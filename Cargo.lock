@@ -3,12 +3,27 @@
 version = 4
 
 [[package]]
+name = "mochi"
+version = "0.1.0"
+
+[[package]]
 name = "monye"
 version = "0.1.0"
 dependencies = [
+ "mochi",
  "monye-syntax",
+ "munyo",
+ "penyo",
 ]
 
 [[package]]
 name = "monye-syntax"
+version = "0.1.0"
+
+[[package]]
+name = "munyo"
+version = "0.1.0"
+
+[[package]]
+name = "penyo"
 version = "0.1.0"

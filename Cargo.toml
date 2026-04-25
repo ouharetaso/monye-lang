@@ -10,3 +10,6 @@ edition = "2024"
 
 [workspace.dependencies]
 monye-syntax = { path = "crates/monye-syntax" }
+mochi = { path = "crates/mochi"}
+penyo = { path = "crates/penyo"}
+munyo = { path = "crates/munyo"}

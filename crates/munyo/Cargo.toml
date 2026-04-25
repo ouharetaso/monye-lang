@@ -1,0 +1,6 @@
+[package]
+name = "munyo"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

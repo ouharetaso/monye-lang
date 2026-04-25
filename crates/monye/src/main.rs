@@ -4,7 +4,7 @@ use monye_syntax::{
 };
 
 
-fn print_unexpected_token(program: &str, span: Span) {
+fn print_error_range(program: &str, span: Span) {
     for (line_number, line) in program.lines().enumerate().map(|(i, n)| (i+1, n) ) {
         let line_start = line.as_ptr() as usize - program.as_ptr() as usize;
         let line_end = line_start + line.len();
@@ -40,7 +40,7 @@ fn main() -> i32 {
     match parse(&mut tokens) {
         Ok(ast) => println!("{:?}", ast),
         Err(ParseError::UnexpectedToken(span)) => {
-            print_unexpected_token(program, span);
+            print_error_range(program, span);
         }
         Err(e) => {
             println!("{}", e);

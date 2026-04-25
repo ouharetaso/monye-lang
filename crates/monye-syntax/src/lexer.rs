@@ -24,7 +24,7 @@ impl PartialEq for Token {
 
 #[derive(PartialEq, Debug, Clone)]
 pub enum TokenKind {
-    Number(isize),
+    Number(u64),
     Keyword(Keyword),
     Identifier(String),
     Type(PrimitiveType),

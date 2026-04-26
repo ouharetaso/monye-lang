@@ -8,12 +8,31 @@ pub trait Lexer<'a> {
 }
 
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct Span(pub usize, pub usize);
 
+impl Span {
+    pub fn start(&self) -> usize {
+        self.0
+    }
+
+    pub fn end(&self) -> usize {
+        self.1
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Token(pub TokenKind, pub Span);
+
+impl Token {
+    pub fn kind(&self) -> &TokenKind {
+        &self.0
+    }
+
+    pub fn span(&self) -> Span {
+        self.1
+    }
+}
 
 impl PartialEq for Token {
     fn eq(&self, other: &Self) -> bool {
@@ -46,6 +65,12 @@ pub enum TokenKind {
     Equal,
     Arrow,
     EOF
+}
+
+impl PartialEq<TokenKind> for &TokenKind  {
+    fn eq(&self, other: &TokenKind) -> bool {
+        <TokenKind as PartialEq>::eq(*self, other)
+    }
 }
 
 

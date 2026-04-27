@@ -61,26 +61,52 @@ pub struct ConstId(pub u16);
 
 
 #[derive(Debug)]
-struct Function {
-    name: String,
-    signature: Signature,
-    code: Vec<Instruction>,
+pub struct Function {
+    pub name: String,
+    pub signature: Signature,
+    pub code: Vec<Instruction>,
+    pub register_count: u16,
 }
 
 
 impl Function {
     fn new(name: &str, signature: &Signature, code: Vec<Instruction>) -> Self {
+        let mut max_reg = signature.params().len() as u16 - 1;
+
+        for insn in &code {
+            let a = insn.1;
+            let b = insn.2;
+            let c = insn.3;
+            match insn.0 {
+                Const | Ret => {
+                    max_reg = max_reg.max(a);
+                },
+                Neg | Mov => {
+                    max_reg = max_reg.max(a).max(b);
+                }
+                Add | Sub | Mul | Div | Rem => {
+                    max_reg = max_reg.max(a).max(b).max(c);
+                },
+                FnCall => {
+                    let target = b;
+                    let argc = c;
+                    max_reg = max_reg.max(target + argc);
+                }
+            }
+        }
+
         Self {
             name: name.to_string(),
             signature: signature.clone(),
-            code
+            code,
+            register_count: max_reg
         }
     }
 }
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Signature {
+pub struct Signature {
     params: Vec<TypeName>,
     ret_ty: TypeName,
 }
@@ -94,11 +120,11 @@ impl Signature {
         }
     }
 
-    fn params(&self) -> &Vec<TypeName> {
+    pub fn params(&self) -> &Vec<TypeName> {
         &self.params
     }
 
-    fn ret_ty(&self) -> &TypeName {
+    pub fn ret_ty(&self) -> &TypeName {
         &self.ret_ty
     }
 }
@@ -171,14 +197,6 @@ impl LocalEnv {
         self.variables.insert(name.to_string(), (ty.clone(), reg));
 
         reg
-    }
-
-    fn get_reg(&self, name: &str) -> Option<Reg> {
-        self.variables.get(name).map(|&(_, reg)| reg)
-    }
-
-    fn get_type(&self, name: &str) -> Option<&TypeName> {
-        self.variables.get(name).map(|(ty, _)| ty)
     }
 
     fn get_variable(&self, name: &str) -> Option<(&TypeName, Reg)> {

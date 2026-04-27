@@ -71,7 +71,7 @@ pub struct Function {
 
 impl Function {
     fn new(name: &str, signature: &Signature, code: Vec<Instruction>) -> Self {
-        let mut max_reg = signature.params().len() as u16 - 1;
+        let mut max_reg = (signature.params().len() as u16).saturating_sub(1);
 
         for insn in &code {
             let a = insn.1;
@@ -99,7 +99,7 @@ impl Function {
             name: name.to_string(),
             signature: signature.clone(),
             code,
-            register_count: max_reg
+            register_count: max_reg + 1
         }
     }
 }

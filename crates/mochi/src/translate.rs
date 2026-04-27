@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use monye_syntax::{
     lexer::{
-        PrimitiveType::self,
+        PrimitiveType,
         Span
     },
     parser::{
@@ -23,9 +23,9 @@ use crate::instruction::{
 
 #[derive(Debug)]
 pub struct Mochi {
-    constants: Vec<u64>,
-    functions: Vec<Function>,
-    entry_point: String,
+    pub constants: Vec<u64>,
+    pub functions: Vec<Function>,
+    pub entry_point: String,
 }
 
 

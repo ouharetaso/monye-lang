@@ -109,7 +109,7 @@ impl std::str::FromStr for Keyword {
 
 
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PrimitiveType {
     I8,
     U8,
@@ -119,6 +119,7 @@ pub enum PrimitiveType {
     U32,
     I64,
     U64,
+    Integer
 }
 
 impl PrimitiveType {
@@ -143,6 +144,21 @@ impl PrimitiveType {
             PrimitiveType::U32 => "u32",
             PrimitiveType::I64 => "i64",
             PrimitiveType::U64 => "u64",
+            PrimitiveType::Integer => "integer"
+        }
+    }
+
+    pub fn try_cast(&self, other: &Self) -> Option<Self> {
+        match (self, other) {
+            (Self::Integer, Self::Integer) => Some(Self::Integer),
+            (Self::Integer, cast_to @ _) => Some(*cast_to),
+            (cast_to @ _, Self::Integer) => Some(*cast_to),
+            (_, _) => if self == other {
+                Some(*self)
+            }
+            else {
+                None
+            }
         }
     }
 }

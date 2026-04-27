@@ -63,6 +63,7 @@ pub struct ConstId(pub u16);
 #[derive(Debug)]
 pub struct Function {
     pub name: String,
+    pub func_id: FuncId,
     pub signature: Signature,
     pub code: Vec<Instruction>,
     pub register_count: u16,
@@ -70,7 +71,7 @@ pub struct Function {
 
 
 impl Function {
-    fn new(name: &str, signature: &Signature, code: Vec<Instruction>) -> Self {
+    fn new(name: &str, func_id: FuncId, signature: &Signature, code: Vec<Instruction>) -> Self {
         let mut max_reg = (signature.params().len() as u16).saturating_sub(1);
 
         for insn in &code {
@@ -97,6 +98,7 @@ impl Function {
 
         Self {
             name: name.to_string(),
+            func_id,
             signature: signature.clone(),
             code,
             register_count: max_reg + 1
@@ -372,9 +374,12 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                     .collect(),
                     spanned_ret_ty.node()
                 );
+                // 無いわけない
+                let (_, func_id) = global_env.get_func(spanned_name.node()).unwrap();
 
                 let function = Function::new(
                     spanned_name.node(),
+                    *func_id,
                     &signature,
                     insn_seq
                 );

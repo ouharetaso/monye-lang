@@ -2,6 +2,7 @@ use monye_syntax::{
     lexer::*,
     parser::*,
 };
+use mochi::translate::translate;
 
 
 fn print_error_range(program: &str, span: Span) {
@@ -37,16 +38,30 @@ fn main() -> i32 {
 
     let mut lexer = StringLexer::new(program);
     let mut tokens = lexer.lex()?;
-    match parse(&mut tokens) {
-        Ok(ast) => println!("{:?}", ast),
+    let ast = match parse(&mut tokens) {
+        Ok(ast) => ast,
         Err(ParseError::UnexpectedToken(span)) => {
             print_error_range(program, span);
-        }
+            return Ok(());
+        },
         Err(e) => {
             println!("{}", e);
+            return Ok(());
         }
-    }
+    };
+
+    println!("{:?}", ast);
     
+    let mochi = match translate(ast) {
+        Ok(mochi) => mochi,
+        Err(e) => {
+            eprintln!("{}", e);
+            print_error_range(program, e.span());
+            return Ok(())
+        }
+    };
+
+    print!("{:?}", mochi);
 
     Ok(())
 }

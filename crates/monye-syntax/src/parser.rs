@@ -38,7 +38,7 @@ pub enum Declaration {
         name: Spanned<Ident>,
         params: Vec<(Spanned<Ident>, Spanned<TypeName>)>,
         ret_ty: Spanned<TypeName>,
-        body: Vec<Spanned<Statement>>
+        body: Spanned<Vec<Spanned<Statement>>>
     }
 }
 
@@ -78,7 +78,7 @@ pub enum Expression {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TypeName {
     Primitive(PrimitiveType),
     //UserDefined(Ident),
@@ -227,9 +227,10 @@ fn type_name(tokens: &mut VecDeque<Token>) -> Result<Spanned<TypeName>, ParseErr
 }
 
 
-fn block(tokens: &mut VecDeque<Token>) -> Result<Vec<Spanned<Statement>>, ParseError> {
+fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>>, ParseError> {
     let mut result = Vec::new();
 
+    let start = peek(tokens)?.span().start();
     consume(tokens, LBrace)?;
 
     loop {
@@ -251,9 +252,10 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Vec<Spanned<Statement>>, ParseE
             Token(_, span) => return Err(ParseError::UnexpectedToken(span))
         }
     }
+    let end = peek(tokens)?.span().end();
     consume(tokens, RBrace)?;
 
-    Ok(result)
+    Ok(Spanned(result, Span(start, end)))
 }
 
 

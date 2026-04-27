@@ -2,12 +2,12 @@
 
 #[repr(C)]
 #[derive(Debug)]
-pub struct Instruction {
-    op: OpCode,
-    a: u16,
-    b: u16,
-    c: u16,
-}
+pub struct Instruction(
+    pub OpCode,
+    pub u16,
+    pub u16,
+    pub u16
+);
 
 #[repr(u16)]
 #[derive(Debug)]
@@ -22,7 +22,7 @@ pub enum OpCode {
     Rem,
     Neg,
 
-    Call,
+    FnCall,
     Ret,
 }
 

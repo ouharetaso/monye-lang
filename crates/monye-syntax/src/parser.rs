@@ -190,16 +190,27 @@ fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Spanned<Ident>, Spann
         return Err(ParseError::UnexpectedToken(span));
     }
 
+    match peek(tokens)? {
+        Token(Identifier(_), _) => {
+            result.push(typed_binding(tokens)?);
+        },
+        Token(RParen, _) => return Ok(result),
+        Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+    }
+
     loop {
         match peek(tokens)? {
-            Token(Identifier(_), _) => result.push(typed_binding(tokens)?),
-            Token(Comma, _) => {
-                consume(tokens, Comma)?;
-                continue;
+            Token(Comma, _) => consume(tokens, Comma)?,
+            Token(RParen, _) => break,
+            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+        };
+        match peek(tokens)? {
+            Token(Identifier(_), _) => {
+                result.push(typed_binding(tokens)?);
             },
             Token(RParen, _) => break,
             Token(_, span) => return Err(ParseError::UnexpectedToken(span))
-        }
+        };
     }
     Ok(result)
 }

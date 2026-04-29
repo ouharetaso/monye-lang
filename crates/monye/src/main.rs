@@ -3,6 +3,7 @@ use monye_syntax::{
     parser::*,
 };
 use mochi::translate::translate;
+use penyo::runner::run;
 
 
 fn print_error_range(program: &str, span: Span) {
@@ -55,8 +56,6 @@ fn main() -> i32 {
             return Ok(());
         }
     };
-
-    //println!("{:?}", ast);
     
     let mochi = match translate(ast) {
         Ok(mochi) => mochi,
@@ -67,6 +66,7 @@ fn main() -> i32 {
         }
     };
 
+    
     println!("constants: [");
     for constant in &mochi.constants {
         println!("    {},", constant);
@@ -90,6 +90,9 @@ fn main() -> i32 {
         println!("    ],");
     }
     println!("]");
+    
+
+    run(&mochi)?;
 
     Ok(())
 }

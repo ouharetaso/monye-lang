@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use monye_syntax::{
     lexer::{
-        PrimitiveType,
+        PrimitiveType::{self, *},
         Span
     },
     parser::{
@@ -11,14 +11,15 @@ use monye_syntax::{
         Declaration,
         Statement,
         Expression,
-        BinOp,
         UniOp,
     }
 };
 use crate::instruction::{
-    Instruction,
-    OpCode::*
+    BinOpExt, Instruction, OpCode::*
 };
+
+
+const DEFAULT_FALLBACK_TYPE: PrimitiveType = I32;
 
 
 #[derive(Debug)]
@@ -72,36 +73,18 @@ pub struct Function {
 
 impl Function {
     fn new(name: &str, func_id: FuncId, signature: &Signature, code: Vec<Instruction>) -> Self {
-        let mut max_reg = (signature.params().len() as u16).saturating_sub(1);
+        let max_reg_index = code.iter()
+            .map(|insn| insn.max_reg_index().unwrap_or(0))
+            .max()
+            .unwrap_or(0u16);
 
-        for insn in &code {
-            let a = insn.1;
-            let b = insn.2;
-            let c = insn.3;
-            match insn.0 {
-                Const | Ret => {
-                    max_reg = max_reg.max(a);
-                },
-                Neg | Mov => {
-                    max_reg = max_reg.max(a).max(b);
-                }
-                Add | Sub | Mul | Div | Rem => {
-                    max_reg = max_reg.max(a).max(b).max(c);
-                },
-                FnCall => {
-                    let target = b;
-                    let argc = c;
-                    max_reg = max_reg.max(target + argc);
-                }
-            }
-        }
 
         Self {
             name: name.to_string(),
             func_id,
             signature: signature.clone(),
             code,
-            register_count: max_reg + 1
+            register_count: max_reg_index + 1
         }
     }
 }
@@ -240,6 +223,8 @@ pub enum ErrorKind {
     UndefinedFunction(String),
     InvalidArgumentCount(usize, usize),
     InvalidArgumentType(TypeName, TypeName),
+    OperantionUndefined(TypeName),
+    CannnotNegate(PrimitiveType),
     NothingReturned,
 }
 
@@ -273,6 +258,12 @@ impl std::fmt::Display for TranslateError {
             },
             ErrorKind::NothingReturned => {
                 write!(f, "nothing returned")
+            },
+            ErrorKind::OperantionUndefined(ty) => {
+                write!(f, "operation is undefined for {:?}", ty)
+            }
+            ErrorKind::CannnotNegate(prim_ty) => {
+                write!(f, "cannot negate type \"{:?}\"", prim_ty)
             }
         }
     }
@@ -316,7 +307,7 @@ impl TypeNameExt for TypeName {
 pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
     let mut global_env = GlobalEnv::new();
 
-    // register functions
+    // register functions to global environment
     for decl in &ast.0 {
         match decl {
             Declaration::FnDecl {
@@ -356,7 +347,8 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                 let (insn_seq, ty) = translate_block(
                     &mut global_env,
                     Some(local_env),
-                    spanned_body
+                    spanned_body,
+                    Some(spanned_ret_ty.node())
                 )?;
 
                 match spanned_ret_ty.node().try_cast(&ty) {
@@ -395,13 +387,17 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
 fn translate_block(
     global_env: &mut GlobalEnv,
     local_env: Option<LocalEnv>,
-    block: &Spanned<Vec<Spanned<Statement>>>
+    block: &Spanned<Vec<Spanned<Statement>>>,
+    expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
     let mut result = Vec::new();
     let mut local_env = local_env.unwrap_or(LocalEnv::new());
     let mut last_expr_type_reg = None as Option<(TypeName, Reg)>;
 
-    for statement in block.node() {
+    for (is_last_statement, statement) in block.node()
+        .iter().enumerate()
+        .map(|(i, n)| (i == block.node().len() - 1, n))
+    {
         match statement.node() {
             Statement::Bind {
                 name: spanned_name,
@@ -418,7 +414,8 @@ fn translate_block(
                         global_env,
                         &local_env,
                         reg,
-                        spanned_expr
+                        spanned_expr,
+                        Some(ty)
                     )?;
 
                     let _ = match ty.try_cast(&expr_type) {
@@ -442,7 +439,13 @@ fn translate_block(
                     global_env,
                     &local_env,
                     target_reg,
-                    spanned_expr
+                    spanned_expr,
+                    if is_last_statement {
+                        expected_ty
+                    }
+                    else {
+                        None
+                    }
                 )?;
 
                 result.extend(insn_seq);
@@ -470,7 +473,8 @@ fn translate_expr(
     global_env: &mut GlobalEnv,
     local_env: &LocalEnv,
     target_reg: Reg,
-    spanned_expr: &Spanned<Expression>
+    spanned_expr: &Spanned<Expression>,
+    expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
     let expr = spanned_expr.node();
     let span = spanned_expr.span();
@@ -492,7 +496,8 @@ fn translate_expr(
                 global_env,
                 local_env,
                 target_reg,
-                expr
+                expr,
+                Some(lhs_type)
             )?;
 
             let expr_type = match lhs_type.try_cast(&rhs_type) {
@@ -519,25 +524,19 @@ fn translate_expr(
                 global_env,
                 local_env,
                 target_reg,
-                lhs
+                lhs,
+                expected_ty
             )?;
             let (rhs_result, rhs_type) = translate_expr(
                 global_env,
                 local_env,
                 target_reg + 1,
-                rhs
+                rhs,
+                expected_ty
             )?;
             
             result.extend(lhs_result);
             result.extend(rhs_result);
-
-            let op = match op {
-                BinOp::Add => Add,
-                BinOp::Sub => Sub,
-                BinOp::Mul => Mul,
-                BinOp::Div => Div,
-                BinOp::Rem => Rem,
-            };
 
             let expr_type = match lhs_type.try_cast(&rhs_type) {
                 Ok(ty) => ty,
@@ -546,6 +545,26 @@ fn translate_expr(
                     span
                 )),
             };
+
+            #[allow(irrefutable_let_patterns)]
+            let TypeName::Primitive(ty) = expr_type else {
+                unreachable!(); // 今のところ
+                #[allow(unreachable_code)]
+                return Err(TranslateError(
+                    ErrorKind::OperantionUndefined(expr_type),
+                    span
+                ))
+            };
+
+            let ty = if ty == Integer {
+                DEFAULT_FALLBACK_TYPE
+            }
+            else {
+                ty
+            };
+
+            // 多分どの場合でも変換できる
+            let op = op.to_typed_op(ty).unwrap();
 
             result.extend(vec![
                 Instruction(op, target_reg.0, target_reg.0, target_reg.0 + 1)
@@ -579,7 +598,8 @@ fn translate_expr(
                     global_env,
                     local_env,
                     dest_reg,
-                    &param
+                    &param,
+                    Some(param_type)
                 )?;
                 match param_type.try_cast(&ty) {
                     Ok(_ty) => (),
@@ -604,7 +624,15 @@ fn translate_expr(
                 Instruction(Const, target_reg.0, const_index, 0)
             ]);
 
-            Ok((result, TypeName::Primitive(PrimitiveType::Integer)))
+            Ok((
+                result,
+                if let Some(ty) = expected_ty {
+                    ty.clone()
+                }
+                else {
+                    TypeName::Primitive(Integer)
+                }
+            ))
         },
         Expression::UniOp {
             operand,
@@ -612,24 +640,82 @@ fn translate_expr(
         } => {
             let mut result = Vec::new();
 
+            if let Expression::Number(n) = operand.node()
+                && op == &UniOp::Neg
+            {
+                match expected_ty.unwrap_or(&Primitive(DEFAULT_FALLBACK_TYPE)) {
+                    ty @ Primitive(I8 | I16 | I32 | I64 | Integer) => {
+                        let const_index = global_env.add_const((-(*n as i64)) as u64);
+                        result.extend(vec![
+                            Instruction(Const, target_reg.0, const_index, 0)
+                        ]);
+                        return Ok((result, ty.clone()))
+                    },
+                    Primitive(prim_ty @ (U8 | U16 | U32 | U64)) => {
+                        return Err(TranslateError(
+                            ErrorKind::CannnotNegate(*prim_ty),
+                            span
+                        ))
+                    },
+                }
+            }
+
             let (insn_seq, ty) = translate_expr(
                 global_env,
                 local_env,
                 target_reg,
-                operand
+                operand,
+                expected_ty
             )?;
 
             result.extend(insn_seq);
 
-            let op = match op {
-                UniOp::Neg => Neg
+            let ty = match (&ty, expected_ty) {
+                (_, Some(expected)) => {
+                    ty.try_cast(expected).map_err(|e|{
+                        TranslateError(e, span)
+                    })?
+                },
+                (t, None) => t.clone()
+            };
+            
+            #[allow(irrefutable_let_patterns)]
+            let TypeName::Primitive(ty) = ty else {
+                unreachable!(); // 今のところ
+                #[allow(unreachable_code)]
+                return Err(TranslateError(
+                    ErrorKind::OperantionUndefined(ty),
+                    span
+                ))
+            };
+
+            let ty = if ty == Integer {
+                DEFAULT_FALLBACK_TYPE
+            }
+            else {
+                ty
+            };
+
+            let op = match (op, ty) {
+                (UniOp::Neg, I8)  => NegI8,
+                (UniOp::Neg, I16) => NegI16,
+                (UniOp::Neg, I32) => NegI32,
+                (UniOp::Neg, I64) => NegI64,
+                (UniOp::Neg, U8| U16 | U32 | U64) => return Err(TranslateError(
+                    ErrorKind::CannnotNegate(ty),
+                    span
+                )),
+                (_, _) => return Err(TranslateError(
+                    ErrorKind::OperantionUndefined(Primitive(ty)),
+                    span
+                ))
             };
 
             result.extend(vec![
                 Instruction(op, target_reg.0, target_reg.0, 0)
             ]);
 
-            Ok((result, ty))
+            Ok((result, Primitive(ty)))
         },
         Expression::Value(name) => {
             let mut result = Vec::new();

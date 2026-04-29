@@ -66,13 +66,6 @@ fn main() -> i32 {
         }
     };
 
-    
-    println!("constants: [");
-    for constant in &mochi.constants {
-        println!("    {},", constant);
-    }
-    println!("]");
-
     println!("functions: [");
     for function in &mochi.functions {
         println!("    name: {}", function.name);
@@ -80,6 +73,11 @@ fn main() -> i32 {
         println!("    params: [");
         for param in function.signature.params() {
             println!("        {:?},", param);
+        }
+        println!("    ]");
+        println!("    consts: [");
+        for constant in &function.constants {
+            println!("        {},", constant);
         }
         println!("    ]");
         println!("    return type: {:?}", function.signature.ret_ty());

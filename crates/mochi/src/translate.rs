@@ -24,16 +24,14 @@ const DEFAULT_FALLBACK_TYPE: PrimitiveType = I32;
 
 #[derive(Debug)]
 pub struct Mochi {
-    pub constants: Vec<u64>,
     pub functions: Vec<Function>,
     pub entry_point: String,
 }
 
 
 impl Mochi {
-    fn new(constants: Vec<u64>, functions: Vec<Function>) -> Self {
+    fn new(functions: Vec<Function>) -> Self {
         Self {
-            constants,
             functions,
             entry_point: "main".to_string()
         }
@@ -68,11 +66,12 @@ pub struct Function {
     pub signature: Signature,
     pub code: Vec<Instruction>,
     pub register_count: u16,
+    pub constants: Vec<u64>,
 }
 
 
 impl Function {
-    fn new(name: &str, func_id: FuncId, signature: &Signature, code: Vec<Instruction>) -> Self {
+    fn new(name: &str, func_id: FuncId, signature: &Signature, code: Vec<Instruction>, constants: Vec<u64>) -> Self {
         let max_reg_index = code.iter()
             .map(|insn| insn.max_reg_index().unwrap_or(0))
             .max()
@@ -84,7 +83,8 @@ impl Function {
             func_id,
             signature: signature.clone(),
             code,
-            register_count: max_reg_index + 1
+            register_count: max_reg_index + 1,
+            constants
         }
     }
 }
@@ -118,7 +118,6 @@ impl Signature {
 #[derive(Debug)]
 struct GlobalEnv {
     func_defs: Vec<(String, Signature)>,
-    consts: Vec<u64>,
 }
 
 
@@ -126,7 +125,6 @@ impl GlobalEnv {
     fn new() -> Self {
         Self {
             func_defs: Vec::new(),
-            consts: Vec::new(),
         }
     }
 
@@ -145,20 +143,6 @@ impl GlobalEnv {
             })
             .map(|(i, (_func_name, signature))| (signature, FuncId(i as u16)))
 
-    }
-
-    fn add_const(&mut self, n: u64) -> u16 {
-        if let Some(i) = self.consts.iter()
-            .enumerate()
-            .find(|(_i, x)| &n == *x)
-            .map(|(i, _)| i)
-        {
-            i as u16
-        }
-        else {
-            self.consts.push(n);
-            (self.consts.len() - 1) as u16
-        }
     }
 }
 
@@ -340,6 +324,7 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                 body: spanned_body 
             } => {
                 let mut local_env = LocalEnv::new();
+                let mut constants = Vec::new();
                 for (param, ty) in spanned_params {
                     local_env.add_variable(param.node(), ty.node());
                 }
@@ -347,6 +332,7 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                 let (insn_seq, ty) = translate_block(
                     &mut global_env,
                     Some(local_env),
+                    &mut constants,
                     spanned_body,
                     Some(spanned_ret_ty.node())
                 )?;
@@ -373,20 +359,22 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                     spanned_name.node(),
                     func_id,
                     &signature,
-                    insn_seq
+                    insn_seq,
+                    constants
                 );
                 functions.push(function);
             },
         }
     }
     
-    Ok(Mochi::new(global_env.consts, functions))
+    Ok(Mochi::new(functions))
 }
 
 
 fn translate_block(
     global_env: &mut GlobalEnv,
     local_env: Option<LocalEnv>,
+    constants: &mut Vec<u64>,
     block: &Spanned<Vec<Spanned<Statement>>>,
     expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
@@ -413,6 +401,7 @@ fn translate_block(
                     let (insn_seq, expr_type) = translate_expr(
                         global_env,
                         &local_env,
+                        constants,
                         reg,
                         spanned_expr,
                         Some(ty)
@@ -438,6 +427,7 @@ fn translate_block(
                 let (insn_seq, expr_type) = translate_expr(
                     global_env,
                     &local_env,
+                    constants,
                     target_reg,
                     spanned_expr,
                     if is_last_statement {
@@ -472,12 +462,26 @@ fn translate_block(
 fn translate_expr(
     global_env: &mut GlobalEnv,
     local_env: &LocalEnv,
+    constants: &mut Vec<u64>,
     target_reg: Reg,
     spanned_expr: &Spanned<Expression>,
     expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
     let expr = spanned_expr.node();
     let span = spanned_expr.span();
+
+    fn add_const(constants: &mut Vec<u64>, n: u64) -> u16 {
+        if let Some(i) = constants.iter().enumerate()
+            .find(|(_i, x)| *x == &n)
+            .map(|(i, _x)| i)
+        {
+            i as u16
+        }
+        else {
+            constants.push(n);
+            (constants.len() - 1) as u16
+        }
+    }
 
     match expr {
         Expression::Assign {
@@ -495,6 +499,7 @@ fn translate_expr(
             let (mut result, ref rhs_type) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg,
                 expr,
                 Some(lhs_type)
@@ -523,6 +528,7 @@ fn translate_expr(
             let (lhs_result, lhs_type) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg,
                 lhs,
                 expected_ty
@@ -530,6 +536,7 @@ fn translate_expr(
             let (rhs_result, rhs_type) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg + 1,
                 rhs,
                 expected_ty
@@ -597,6 +604,7 @@ fn translate_expr(
                 let (insn_seq, ty) = translate_expr(
                     global_env,
                     local_env,
+                    constants,
                     dest_reg,
                     &param,
                     Some(param_type)
@@ -619,7 +627,7 @@ fn translate_expr(
         },
         Expression::Number(n) => {
             let mut result = Vec::new();
-            let const_index = global_env.add_const(*n);
+            let const_index = add_const(constants, *n);
             result.extend(vec![
                 Instruction(Const, target_reg.0, const_index, 0)
             ]);
@@ -645,7 +653,7 @@ fn translate_expr(
             {
                 match expected_ty.unwrap_or(&Primitive(DEFAULT_FALLBACK_TYPE)) {
                     ty @ Primitive(I8 | I16 | I32 | I64 | Integer) => {
-                        let const_index = global_env.add_const((-(*n as i64)) as u64);
+                        let const_index = add_const(constants, (-(*n as i64)) as u64);
                         result.extend(vec![
                             Instruction(Const, target_reg.0, const_index, 0)
                         ]);
@@ -663,6 +671,7 @@ fn translate_expr(
             let (insn_seq, ty) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg,
                 operand,
                 expected_ty

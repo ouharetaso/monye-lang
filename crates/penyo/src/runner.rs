@@ -42,7 +42,7 @@ pub fn run(mochi: &Mochi) -> Result<(), RuntimeError> {
 
 fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, RuntimeError> {
     let func = &mochi.functions[func_id.0 as usize];
-    let constants = &mochi.constants;
+    let constants = &func.constants;
     
     let mut registers = args;
     registers.resize(func.register_count as usize, 0);

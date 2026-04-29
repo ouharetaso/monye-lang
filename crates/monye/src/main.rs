@@ -25,6 +25,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
 fn square(a: i32) -> i32 {
     a * a
 }
+
+
+fn moni() -> u64 {
+    32768 + 65536
+}
+
     
 fn main() -> i32 {
     let a: i32 = 42;
@@ -50,7 +56,7 @@ fn main() -> i32 {
         }
     };
 
-    println!("{:?}", ast);
+    //println!("{:?}", ast);
     
     let mochi = match translate(ast) {
         Ok(mochi) => mochi,
@@ -61,7 +67,29 @@ fn main() -> i32 {
         }
     };
 
-    print!("{:?}", mochi);
+    println!("constants: [");
+    for constant in &mochi.constants {
+        println!("    {},", constant);
+    }
+    println!("]");
+
+    println!("functions: [");
+    for function in &mochi.functions {
+        println!("    name: {}", function.name);
+        println!("    func_id: {:?}", function.func_id);
+        println!("    params: [");
+        for param in function.signature.params() {
+            println!("        {:?},", param);
+        }
+        println!("    ]");
+        println!("    return type: {:?}", function.signature.ret_ty());
+        println!("    code [");
+        for insn in &function.code {
+            println!("        {:?},", insn);
+        }
+        println!("    ],");
+    }
+    println!("]");
 
     Ok(())
 }

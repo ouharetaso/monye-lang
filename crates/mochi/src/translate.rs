@@ -117,7 +117,7 @@ impl Signature {
 
 #[derive(Debug)]
 struct GlobalEnv {
-    func_defs: HashMap<String, (Signature, FuncId)>,
+    func_defs: Vec<(String, Signature)>,
     consts: Vec<u64>,
 }
 
@@ -125,26 +125,26 @@ struct GlobalEnv {
 impl GlobalEnv {
     fn new() -> Self {
         Self {
-            func_defs: HashMap::new(),
+            func_defs: Vec::new(),
             consts: Vec::new(),
         }
     }
 
     fn add_func(&mut self, name: &str, signature: &Signature) -> FuncId {
-        let func_id = self.func_defs
-            .values()
-            .map(|v| v.1)
-            .max()
-            .map(|FuncId(i)| FuncId(i + 1))
-            .unwrap_or(FuncId(0));
+        let func_id = FuncId(self.func_defs.len() as u16);
 
-        self.func_defs.insert(name.to_string(), (signature.clone(), func_id));
+        self.func_defs.push((name.to_string(), signature.clone()));
 
-        func_id        
+        func_id
     }
 
-    fn get_func(&self, name: &str) -> Option<&(Signature, FuncId)> {
-        self.func_defs.get(name)
+    fn get_func(&self, name: &str) -> Option<(&Signature, FuncId)> {
+        self.func_defs.iter().enumerate()
+            .find(|(_i, (func_name, _signature))|{
+                func_name == name
+            })
+            .map(|(i, (_func_name, signature))| (signature, FuncId(i as u16)))
+
     }
 
     fn add_const(&mut self, n: u64) -> u16 {
@@ -371,7 +371,7 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
 
                 let function = Function::new(
                     spanned_name.node(),
-                    *func_id,
+                    func_id,
                     &signature,
                     insn_seq
                 );
@@ -579,7 +579,7 @@ fn translate_expr(
             let mut result = Vec::new();
             let arg_base = target_reg + 1;
             let (signature, func_id) = global_env.get_func(name)
-                .cloned()
+                .map(|(signature, func_id)| (signature.clone(), func_id))
                 .ok_or(TranslateError(ErrorKind::UndefinedFunction(name.clone()), span))?;
 
             let argc = signature.params().len() as u16;

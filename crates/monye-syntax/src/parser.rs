@@ -85,7 +85,7 @@ pub enum TypeName {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BinOp {
     Add,
     Sub,
@@ -95,7 +95,7 @@ pub enum BinOp {
 }
 
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UniOp {
     Neg
 }

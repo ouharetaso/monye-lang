@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use monye_syntax::{
     lexer::{
-        PrimitiveType::self,
+        PrimitiveType::{self, *},
         Span
     },
     parser::{
@@ -11,28 +11,27 @@ use monye_syntax::{
         Declaration,
         Statement,
         Expression,
-        BinOp,
         UniOp,
     }
 };
 use crate::instruction::{
-    Instruction,
-    OpCode::*
+    BinOpExt, Instruction, OpCode::*
 };
+
+
+const DEFAULT_FALLBACK_TYPE: PrimitiveType = I32;
 
 
 #[derive(Debug)]
 pub struct Mochi {
-    constants: Vec<u64>,
-    functions: Vec<Function>,
-    entry_point: String,
+    pub functions: Vec<Function>,
+    pub entry_point: String,
 }
 
 
 impl Mochi {
-    fn new(constants: Vec<u64>, functions: Vec<Function>) -> Self {
+    fn new(functions: Vec<Function>) -> Self {
         Self {
-            constants,
             functions,
             entry_point: "main".to_string()
         }
@@ -61,26 +60,38 @@ pub struct ConstId(pub u16);
 
 
 #[derive(Debug)]
-struct Function {
-    name: String,
-    signature: Signature,
-    code: Vec<Instruction>,
+pub struct Function {
+    pub name: String,
+    pub func_id: FuncId,
+    pub signature: Signature,
+    pub code: Vec<Instruction>,
+    pub register_count: u16,
+    pub constants: Vec<u64>,
 }
 
 
 impl Function {
-    fn new(name: &str, signature: &Signature, code: Vec<Instruction>) -> Self {
+    fn new(name: &str, func_id: FuncId, signature: &Signature, code: Vec<Instruction>, constants: Vec<u64>) -> Self {
+        let max_reg_index = code.iter()
+            .map(|insn| insn.max_reg_index().unwrap_or(0))
+            .max()
+            .unwrap_or(0u16);
+
+
         Self {
             name: name.to_string(),
+            func_id,
             signature: signature.clone(),
-            code
+            code,
+            register_count: max_reg_index + 1,
+            constants
         }
     }
 }
 
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct Signature {
+pub struct Signature {
     params: Vec<TypeName>,
     ret_ty: TypeName,
 }
@@ -94,11 +105,11 @@ impl Signature {
         }
     }
 
-    fn params(&self) -> &Vec<TypeName> {
+    pub fn params(&self) -> &Vec<TypeName> {
         &self.params
     }
 
-    fn ret_ty(&self) -> &TypeName {
+    pub fn ret_ty(&self) -> &TypeName {
         &self.ret_ty
     }
 }
@@ -106,48 +117,32 @@ impl Signature {
 
 #[derive(Debug)]
 struct GlobalEnv {
-    func_defs: HashMap<String, (Signature, FuncId)>,
-    consts: Vec<u64>,
+    func_defs: Vec<(String, Signature)>,
 }
 
 
 impl GlobalEnv {
     fn new() -> Self {
         Self {
-            func_defs: HashMap::new(),
-            consts: Vec::new(),
+            func_defs: Vec::new(),
         }
     }
 
     fn add_func(&mut self, name: &str, signature: &Signature) -> FuncId {
-        let func_id = self.func_defs
-            .values()
-            .map(|v| v.1)
-            .max()
-            .map(|FuncId(i)| FuncId(i + 1))
-            .unwrap_or(FuncId(0));
+        let func_id = FuncId(self.func_defs.len() as u16);
 
-        self.func_defs.insert(name.to_string(), (signature.clone(), func_id));
+        self.func_defs.push((name.to_string(), signature.clone()));
 
-        func_id        
+        func_id
     }
 
-    fn get_func(&self, name: &str) -> Option<&(Signature, FuncId)> {
-        self.func_defs.get(name)
-    }
+    fn get_func(&self, name: &str) -> Option<(&Signature, FuncId)> {
+        self.func_defs.iter().enumerate()
+            .find(|(_i, (func_name, _signature))|{
+                func_name == name
+            })
+            .map(|(i, (_func_name, signature))| (signature, FuncId(i as u16)))
 
-    fn add_const(&mut self, n: u64) -> u16 {
-        if let Some(i) = self.consts.iter()
-            .enumerate()
-            .find(|(_i, x)| &n == *x)
-            .map(|(i, _)| i)
-        {
-            i as u16
-        }
-        else {
-            self.consts.push(n);
-            (self.consts.len() - 1) as u16
-        }
     }
 }
 
@@ -171,14 +166,6 @@ impl LocalEnv {
         self.variables.insert(name.to_string(), (ty.clone(), reg));
 
         reg
-    }
-
-    fn get_reg(&self, name: &str) -> Option<Reg> {
-        self.variables.get(name).map(|&(_, reg)| reg)
-    }
-
-    fn get_type(&self, name: &str) -> Option<&TypeName> {
-        self.variables.get(name).map(|(ty, _)| ty)
     }
 
     fn get_variable(&self, name: &str) -> Option<(&TypeName, Reg)> {
@@ -220,6 +207,8 @@ pub enum ErrorKind {
     UndefinedFunction(String),
     InvalidArgumentCount(usize, usize),
     InvalidArgumentType(TypeName, TypeName),
+    OperantionUndefined(TypeName),
+    CannnotNegate(PrimitiveType),
     NothingReturned,
 }
 
@@ -253,6 +242,12 @@ impl std::fmt::Display for TranslateError {
             },
             ErrorKind::NothingReturned => {
                 write!(f, "nothing returned")
+            },
+            ErrorKind::OperantionUndefined(ty) => {
+                write!(f, "operation is undefined for {:?}", ty)
+            }
+            ErrorKind::CannnotNegate(prim_ty) => {
+                write!(f, "cannot negate type \"{:?}\"", prim_ty)
             }
         }
     }
@@ -296,7 +291,7 @@ impl TypeNameExt for TypeName {
 pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
     let mut global_env = GlobalEnv::new();
 
-    // register functions
+    // register functions to global environment
     for decl in &ast.0 {
         match decl {
             Declaration::FnDecl {
@@ -329,6 +324,7 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                 body: spanned_body 
             } => {
                 let mut local_env = LocalEnv::new();
+                let mut constants = Vec::new();
                 for (param, ty) in spanned_params {
                     local_env.add_variable(param.node(), ty.node());
                 }
@@ -336,7 +332,9 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                 let (insn_seq, ty) = translate_block(
                     &mut global_env,
                     Some(local_env),
-                    spanned_body
+                    &mut constants,
+                    spanned_body,
+                    Some(spanned_ret_ty.node())
                 )?;
 
                 match spanned_ret_ty.node().try_cast(&ty) {
@@ -354,31 +352,40 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                     .collect(),
                     spanned_ret_ty.node()
                 );
+                // 無いわけない
+                let (_, func_id) = global_env.get_func(spanned_name.node()).unwrap();
 
                 let function = Function::new(
                     spanned_name.node(),
+                    func_id,
                     &signature,
-                    insn_seq
+                    insn_seq,
+                    constants
                 );
                 functions.push(function);
             },
         }
     }
     
-    Ok(Mochi::new(global_env.consts, functions))
+    Ok(Mochi::new(functions))
 }
 
 
 fn translate_block(
     global_env: &mut GlobalEnv,
     local_env: Option<LocalEnv>,
-    block: &Spanned<Vec<Spanned<Statement>>>
+    constants: &mut Vec<u64>,
+    block: &Spanned<Vec<Spanned<Statement>>>,
+    expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
     let mut result = Vec::new();
     let mut local_env = local_env.unwrap_or(LocalEnv::new());
     let mut last_expr_type_reg = None as Option<(TypeName, Reg)>;
 
-    for statement in block.node() {
+    for (is_last_statement, statement) in block.node()
+        .iter().enumerate()
+        .map(|(i, n)| (i == block.node().len() - 1, n))
+    {
         match statement.node() {
             Statement::Bind {
                 name: spanned_name,
@@ -394,8 +401,10 @@ fn translate_block(
                     let (insn_seq, expr_type) = translate_expr(
                         global_env,
                         &local_env,
+                        constants,
                         reg,
-                        spanned_expr
+                        spanned_expr,
+                        Some(ty)
                     )?;
 
                     let _ = match ty.try_cast(&expr_type) {
@@ -418,8 +427,15 @@ fn translate_block(
                 let (insn_seq, expr_type) = translate_expr(
                     global_env,
                     &local_env,
+                    constants,
                     target_reg,
-                    spanned_expr
+                    spanned_expr,
+                    if is_last_statement {
+                        expected_ty
+                    }
+                    else {
+                        None
+                    }
                 )?;
 
                 result.extend(insn_seq);
@@ -446,11 +462,26 @@ fn translate_block(
 fn translate_expr(
     global_env: &mut GlobalEnv,
     local_env: &LocalEnv,
+    constants: &mut Vec<u64>,
     target_reg: Reg,
-    spanned_expr: &Spanned<Expression>
+    spanned_expr: &Spanned<Expression>,
+    expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
     let expr = spanned_expr.node();
     let span = spanned_expr.span();
+
+    fn add_const(constants: &mut Vec<u64>, n: u64) -> u16 {
+        if let Some(i) = constants.iter().enumerate()
+            .find(|(_i, x)| *x == &n)
+            .map(|(i, _x)| i)
+        {
+            i as u16
+        }
+        else {
+            constants.push(n);
+            (constants.len() - 1) as u16
+        }
+    }
 
     match expr {
         Expression::Assign {
@@ -468,8 +499,10 @@ fn translate_expr(
             let (mut result, ref rhs_type) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg,
-                expr
+                expr,
+                Some(lhs_type)
             )?;
 
             let expr_type = match lhs_type.try_cast(&rhs_type) {
@@ -495,26 +528,22 @@ fn translate_expr(
             let (lhs_result, lhs_type) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg,
-                lhs
+                lhs,
+                expected_ty
             )?;
             let (rhs_result, rhs_type) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg + 1,
-                rhs
+                rhs,
+                expected_ty
             )?;
             
             result.extend(lhs_result);
             result.extend(rhs_result);
-
-            let op = match op {
-                BinOp::Add => Add,
-                BinOp::Sub => Sub,
-                BinOp::Mul => Mul,
-                BinOp::Div => Div,
-                BinOp::Rem => Rem,
-            };
 
             let expr_type = match lhs_type.try_cast(&rhs_type) {
                 Ok(ty) => ty,
@@ -523,6 +552,26 @@ fn translate_expr(
                     span
                 )),
             };
+
+            #[allow(irrefutable_let_patterns)]
+            let TypeName::Primitive(ty) = expr_type else {
+                unreachable!(); // 今のところ
+                #[allow(unreachable_code)]
+                return Err(TranslateError(
+                    ErrorKind::OperantionUndefined(expr_type),
+                    span
+                ))
+            };
+
+            let ty = if ty == Integer {
+                DEFAULT_FALLBACK_TYPE
+            }
+            else {
+                ty
+            };
+
+            // 多分どの場合でも変換できる
+            let op = op.to_typed_op(ty).unwrap();
 
             result.extend(vec![
                 Instruction(op, target_reg.0, target_reg.0, target_reg.0 + 1)
@@ -537,7 +586,7 @@ fn translate_expr(
             let mut result = Vec::new();
             let arg_base = target_reg + 1;
             let (signature, func_id) = global_env.get_func(name)
-                .cloned()
+                .map(|(signature, func_id)| (signature.clone(), func_id))
                 .ok_or(TranslateError(ErrorKind::UndefinedFunction(name.clone()), span))?;
 
             let argc = signature.params().len() as u16;
@@ -555,8 +604,10 @@ fn translate_expr(
                 let (insn_seq, ty) = translate_expr(
                     global_env,
                     local_env,
+                    constants,
                     dest_reg,
-                    &param
+                    &param,
+                    Some(param_type)
                 )?;
                 match param_type.try_cast(&ty) {
                     Ok(_ty) => (),
@@ -576,12 +627,20 @@ fn translate_expr(
         },
         Expression::Number(n) => {
             let mut result = Vec::new();
-            let const_index = global_env.add_const(*n);
+            let const_index = add_const(constants, *n);
             result.extend(vec![
                 Instruction(Const, target_reg.0, const_index, 0)
             ]);
 
-            Ok((result, TypeName::Primitive(PrimitiveType::Integer)))
+            Ok((
+                result,
+                if let Some(ty) = expected_ty {
+                    ty.clone()
+                }
+                else {
+                    TypeName::Primitive(Integer)
+                }
+            ))
         },
         Expression::UniOp {
             operand,
@@ -589,24 +648,83 @@ fn translate_expr(
         } => {
             let mut result = Vec::new();
 
+            if let Expression::Number(n) = operand.node()
+                && op == &UniOp::Neg
+            {
+                match expected_ty.unwrap_or(&Primitive(DEFAULT_FALLBACK_TYPE)) {
+                    ty @ Primitive(I8 | I16 | I32 | I64 | Integer) => {
+                        let const_index = add_const(constants, (-(*n as i64)) as u64);
+                        result.extend(vec![
+                            Instruction(Const, target_reg.0, const_index, 0)
+                        ]);
+                        return Ok((result, ty.clone()))
+                    },
+                    Primitive(prim_ty @ (U8 | U16 | U32 | U64)) => {
+                        return Err(TranslateError(
+                            ErrorKind::CannnotNegate(*prim_ty),
+                            span
+                        ))
+                    },
+                }
+            }
+
             let (insn_seq, ty) = translate_expr(
                 global_env,
                 local_env,
+                constants,
                 target_reg,
-                operand
+                operand,
+                expected_ty
             )?;
 
             result.extend(insn_seq);
 
-            let op = match op {
-                UniOp::Neg => Neg
+            let ty = match (&ty, expected_ty) {
+                (_, Some(expected)) => {
+                    ty.try_cast(expected).map_err(|e|{
+                        TranslateError(e, span)
+                    })?
+                },
+                (t, None) => t.clone()
+            };
+            
+            #[allow(irrefutable_let_patterns)]
+            let TypeName::Primitive(ty) = ty else {
+                unreachable!(); // 今のところ
+                #[allow(unreachable_code)]
+                return Err(TranslateError(
+                    ErrorKind::OperantionUndefined(ty),
+                    span
+                ))
+            };
+
+            let ty = if ty == Integer {
+                DEFAULT_FALLBACK_TYPE
+            }
+            else {
+                ty
+            };
+
+            let op = match (op, ty) {
+                (UniOp::Neg, I8)  => NegI8,
+                (UniOp::Neg, I16) => NegI16,
+                (UniOp::Neg, I32) => NegI32,
+                (UniOp::Neg, I64) => NegI64,
+                (UniOp::Neg, U8| U16 | U32 | U64) => return Err(TranslateError(
+                    ErrorKind::CannnotNegate(ty),
+                    span
+                )),
+                (_, _) => return Err(TranslateError(
+                    ErrorKind::OperantionUndefined(Primitive(ty)),
+                    span
+                ))
             };
 
             result.extend(vec![
                 Instruction(op, target_reg.0, target_reg.0, 0)
             ]);
 
-            Ok((result, ty))
+            Ok((result, Primitive(ty)))
         },
         Expression::Value(name) => {
             let mut result = Vec::new();

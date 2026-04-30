@@ -659,7 +659,7 @@ fn translate_expr(
                         ]);
                         return Ok((result, ty.clone()))
                     },
-                    Primitive(prim_ty @ (U8 | U16 | U32 | U64)) => {
+                    Primitive(prim_ty @ _) => {
                         return Err(TranslateError(
                             ErrorKind::CannnotNegate(*prim_ty),
                             span
@@ -738,6 +738,7 @@ fn translate_expr(
             ]);
 
             Ok((result, ty.clone()))
-        }
+        },
+        _ => unimplemented!()
     }
 }

@@ -76,15 +76,12 @@ pub enum Expression {
     Number(u64),
     Value(Ident),
     Bool(bool),
-    If(Spanned<IfExpr>)
+    If(Spanned<IfExpr>, Vec<Spanned<IfExpr>>, Option<Spanned<Vec<Spanned<Statement>>>>)
 }
 
 
 #[derive(Clone, Debug)]
-pub enum IfExpr {
-    IfElse(Spanned<LogicalExpr>, Spanned<Vec<Spanned<Statement>>>, Option<Box<Spanned<IfExpr>>>),
-    Else(Spanned<Vec<Spanned<Statement>>>)
-}
+pub struct IfExpr(pub Spanned<LogicalExpr>, pub Spanned<Vec<Spanned<Statement>>>);
 
 
 #[derive(Clone, Debug)]
@@ -598,50 +595,44 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
 }
 
 
+#[allow(unused_assignments)]
 fn if_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
-    let expr = if_expr_rec(tokens)?;
-    let span = expr.span();
-    Ok(Spanned(Expression::If(expr), span))
-}
-
-
-fn if_expr_rec(tokens: &mut VecDeque<Token>) -> Result<Spanned<IfExpr>, ParseError> {
     let start = peek(tokens)?.span().start();
     consume(tokens, Keyword(If))?;
     let cond = logic_expr(tokens)?;
     let body = block(tokens)?;
+    let mut end = body.span().end();
+    let first = Spanned(IfExpr(cond, body), Span(start, end));
 
-    let (remainder, end) = if &Keyword(Else) == peek(tokens)?.kind() {
+    let mut else_ifs = Vec::new();
+    let mut else_clause = None;
+
+    while &Keyword(Else) == peek(tokens)?.kind() {
         consume(tokens, Keyword(Else))?;
-        let remainder = match peek(tokens)?.kind() {
+        match peek(tokens)?.kind() {
             Keyword(If) => {
-                Box::new(if_expr_rec(tokens)?)
+                let start = consume(tokens, Keyword(If))?.start();
+                let cond = logic_expr(tokens)?;
+                let body = block(tokens)?;
+                end = body.span().end();
+                else_ifs.push(Spanned(IfExpr(cond, body), Span(start, end)));
             },
             LBrace => {
-                let Spanned(else_block, span) = block(tokens)?;
-                Box::new(Spanned(
-                    IfExpr::Else(Spanned(else_block, span)),
-                    span
-                ))
+                let body = block(tokens)?;
+                end = body.span().end();
+                else_clause = Some(body)
             },
             _ => return Err(ParseError::UnexpectedToken(next(tokens)?.span()))
-        };
-        let end = remainder.span().end();
-        (Some(remainder), end)
+        }
     }
-    else {
-        (None, body.span().end())
-    };
-
-    let span = Span(start, end);
 
     Ok(Spanned(
-        IfExpr::IfElse(
-            cond,
-            body,
-            remainder
+        Expression::If(
+            first,
+            else_ifs,
+            else_clause
         ),
-        span
+        Span(start, end)
     ))
 }
 

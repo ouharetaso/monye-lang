@@ -13,7 +13,7 @@ fn print_error_range(program: &str, span: Span) {
         
         if (line_start..line_end).contains(&span.0) {
             let column = span.0 - line_start;
-            eprintln!("unexpected token at line {} column {}", line_number, column);
+            eprintln!("unexpected token at line {} column {} (span: ({}, {}))", line_number, column, span.start(), span.end());
             eprintln!("{}", line);
             eprintln!("{}{}", " ".repeat(column), "^".repeat(span.1 - span.0));
         }
@@ -23,28 +23,36 @@ fn print_error_range(program: &str, span: Span) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>>{
     let program = "
+fn fib(n: u32) -> u32 {
+    if n == 0 || n == 1 {
+        1
+    }
+    else {
+        fib(n - 1) + fib(n - 2)
+    }
+}
+    
 fn square(a: i32) -> i32 {
     a * a
 }
 
-
-fn moni() -> u64 {
-    32768 + 65536
-}
-
-    
 fn main() -> i32 {
     let a: i32 = 42;
     let b: i32 = 32767;
 
     a = 65535;
 
-    a + square(2) * (b - 29)  / -801 % 53
+    a + square(2) * (b - 29)  / -801 % 53;
+
+    fib(5)
 }
     ";
 
     let mut lexer = StringLexer::new(program);
     let mut tokens = lexer.lex()?;
+
+    println!("{:?}", tokens);
+
     let ast = match parse(&mut tokens) {
         Ok(ast) => ast,
         Err(ParseError::UnexpectedToken(span)) => {
@@ -56,6 +64,8 @@ fn main() -> i32 {
             return Ok(());
         }
     };
+
+    println!("{:?}", ast);
     
     let mochi = match translate(ast) {
         Ok(mochi) => mochi,

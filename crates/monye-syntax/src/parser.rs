@@ -75,7 +75,43 @@ pub enum Expression {
     },
     Number(u64),
     Value(Ident),
+    Bool(bool),
+    If(Spanned<IfExpr>)
 }
+
+
+#[derive(Clone, Debug)]
+pub enum IfExpr {
+    IfElse(Spanned<LogicalExpr>, Spanned<Vec<Spanned<Statement>>>, Option<Box<Spanned<IfExpr>>>),
+    Else(Spanned<Vec<Spanned<Statement>>>)
+}
+
+
+#[derive(Clone, Debug)]
+pub enum LogicalExpr {
+    Factor(Box<Spanned<Expression>>),
+    LogicalOp {
+        lhs: Box<Spanned<LogicalExpr>>,
+        rhs: Box<Spanned<LogicalExpr>>,
+        op: LogicalOp
+    }
+}
+
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum LogicalOp {
+    LogicalOr,
+    LogicalAnd,
+    Equal,
+    NotEqual,
+    LT,
+    GT,
+    LE,
+    GE,
+    NT,
+    NE
+}
+
 
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -92,12 +128,15 @@ pub enum BinOp {
     Mul,
     Div,
     Rem,
+    Or,
+    And,
 }
 
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UniOp {
-    Neg
+    Neg,
+    Inv
 }
 
 
@@ -247,7 +286,7 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>
     loop {
         match peek(tokens)? {
             Token(
-                Keyword(Let) | LParen | Minus | Identifier(_) | Number(_),
+                Keyword(Let) | LParen | Minus | Identifier(_) | Number(_) | Keyword(If),
                 _span
             ) => {
                 result.push(statement(tokens)?);
@@ -274,7 +313,7 @@ fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseEr
     match peek(tokens)? {
         Token(Keyword(Let), _) => Ok(bind(tokens)?),
         Token(
-            Identifier(_) | Minus | Number(_) | LParen,
+            Identifier(_) | Minus | Number(_) | LParen | Keyword(If),
             span_start
         ) => {
             let spanned_expr = assign(tokens)?;
@@ -441,21 +480,34 @@ fn multiply(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
 
 
 fn unary_op(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
-    if peek(tokens)?.kind() == Minus {
-        let Span(start, _) = consume(tokens, Minus)?;
-        let spanned_operand = factor(tokens)?;
-        let end = spanned_operand.span().end();
+    match peek(tokens)?.kind() {
+        Minus => {
+            let Span(start, _) = consume(tokens, Minus)?;
+            let spanned_operand = factor(tokens)?;
+            let end = spanned_operand.span().end();
 
-        Ok(Spanned(
-            Expression::UniOp{
-                operand: Box::new(spanned_operand),
-                op: UniOp::Neg
-            },
-            Span(start, end)
-        ))
-    }
-    else {
-        factor(tokens)
+            Ok(Spanned(
+                Expression::UniOp{
+                    operand: Box::new(spanned_operand),
+                    op: UniOp::Neg
+                },
+                Span(start, end)
+            ))
+        },
+        Exclamation => {
+            let Span(start, _) = consume(tokens, Exclamation)?;
+            let spanned_operand = factor(tokens)?;
+            let end = spanned_operand.span().end();
+
+            Ok(Spanned(
+                Expression::UniOp{
+                    operand: Box::new(spanned_operand),
+                    op: UniOp::Inv
+                },
+                Span(start, end)
+            ))
+        },
+        _ => factor(tokens)
     }
 }
 
@@ -479,6 +531,14 @@ fn factor(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErro
             ))
         }
         Token(Identifier(_), _) => fn_call(tokens),
+        Token(Keyword(b @ (True | False)), _) => {
+            let Token(_, span) = next(tokens)?;
+            Ok(Spanned(
+                Expression::Bool(b == True),
+                span
+            ))
+        },
+        Token(Keyword(If), _) => if_expr(tokens),
         Token(_, span) => Err(ParseError::UnexpectedToken(span))
     }
 }
@@ -497,17 +557,24 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
         if peek(tokens)?.kind() == Comma {
             return Err(ParseError::UnexpectedToken(next(tokens)?.span()));
         }
+
+        match peek(tokens)? {
+            Token(RParen, _) => (),
+            Token(
+                LParen | Number(_) | Identifier(_) | Minus | Keyword(If),
+                _
+            ) => {
+                args.push(expr(tokens)?);
+            },
+            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+        }
+
         loop {
             match peek(tokens)? {
                 Token(RParen, _) => break,
-                Token(
-                    LParen | Number(_) | Identifier(_) | Minus,
-                    _
-                ) => {
-                    args.push(expr(tokens)?);
-                },
                 Token(Comma, _) => {
                     consume(tokens, Comma)?;
+                    args.push(expr(tokens)?);
                     continue;
                 }
                 Token(_, span) => return Err(ParseError::UnexpectedToken(span))
@@ -528,4 +595,226 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
             span
         ))
     }
+}
+
+
+fn if_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+    let expr = if_expr_rec(tokens)?;
+    let span = expr.span();
+    Ok(Spanned(Expression::If(expr), span))
+}
+
+
+fn if_expr_rec(tokens: &mut VecDeque<Token>) -> Result<Spanned<IfExpr>, ParseError> {
+    let start = peek(tokens)?.span().start();
+    consume(tokens, Keyword(If))?;
+    let cond = logic_expr(tokens)?;
+    let body = block(tokens)?;
+
+    let (remainder, end) = if &Keyword(Else) == peek(tokens)?.kind() {
+        consume(tokens, Keyword(Else))?;
+        let remainder = match peek(tokens)?.kind() {
+            Keyword(If) => {
+                Box::new(if_expr_rec(tokens)?)
+            },
+            LBrace => {
+                let Spanned(else_block, span) = block(tokens)?;
+                Box::new(Spanned(
+                    IfExpr::Else(Spanned(else_block, span)),
+                    span
+                ))
+            },
+            _ => return Err(ParseError::UnexpectedToken(next(tokens)?.span()))
+        };
+        let end = remainder.span().end();
+        (Some(remainder), end)
+    }
+    else {
+        (None, body.span().end())
+    };
+
+    let span = Span(start, end);
+
+    Ok(Spanned(
+        IfExpr::IfElse(
+            cond,
+            body,
+            remainder
+        ),
+        span
+    ))
+}
+
+
+fn logic_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<LogicalExpr>, ParseError> {
+    logical_or(tokens)
+}
+
+
+#[allow(unused_assignments)]
+fn logical_or(tokens: &mut VecDeque<Token>) -> Result<Spanned<LogicalExpr>, ParseError> {
+    let mut lhs = logical_and(tokens)?;
+    let Span(start, mut end) = lhs.span();
+
+    while &DoubleVbar == peek(tokens)?.kind() {
+        consume(tokens, DoubleVbar)?;
+        let spanned_rhs = logical_and(tokens)?;
+        end = spanned_rhs.span().end();
+        lhs = Spanned(
+            LogicalExpr::LogicalOp {
+                lhs: Box::new(lhs),
+                rhs: Box::new(spanned_rhs),
+                op: LogicalOp::LogicalOr
+            },
+            Span(start, end)
+        )
+    }
+    Ok(lhs)
+}
+
+
+#[allow(unused_assignments)]
+fn logical_and(tokens: &mut VecDeque<Token>) -> Result<Spanned<LogicalExpr>, ParseError> {
+    let mut lhs = equality(tokens)?;
+    let Span(start, mut end) = lhs.span();
+
+    while &DoubleAmpersand == peek(tokens)?.kind() {
+        consume(tokens, DoubleAmpersand)?;
+        let spanned_rhs = equality(tokens)?;
+        end = spanned_rhs.span().end();
+        lhs = Spanned(
+            LogicalExpr::LogicalOp {
+                lhs: Box::new(lhs),
+                rhs: Box::new(spanned_rhs),
+                op: LogicalOp::LogicalAnd
+            },
+            Span(start, end)
+        )
+    }
+    Ok(lhs)
+}
+
+
+#[allow(unused_assignments)]
+fn equality(tokens: &mut VecDeque<Token>) -> Result<Spanned<LogicalExpr>, ParseError> {
+    let mut lhs = order(tokens)?;
+    let Span(start, mut end) = lhs.span();
+
+    while let DoubleEqual | NE = peek(tokens)?.kind() {
+        match next(tokens)?.kind() {
+            DoubleEqual => {
+                let spanned_rhs = order(tokens)?;
+                end = spanned_rhs.span().end();
+                lhs = Spanned(
+                    LogicalExpr::LogicalOp {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(spanned_rhs),
+                        op: LogicalOp::Equal
+                    },
+                    Span(start, end)
+                )
+            },
+            NE => {
+                let spanned_rhs = order(tokens)?;
+                end = spanned_rhs.span().end();
+                lhs = Spanned(
+                    LogicalExpr::LogicalOp {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(spanned_rhs),
+                        op: LogicalOp::NotEqual
+                    },
+                    Span(start, end)
+                )
+            },
+            _ => unreachable!()
+        }
+    }
+    Ok(lhs)
+}
+
+
+#[allow(unused_assignments)]
+fn order(tokens: &mut VecDeque<Token>) -> Result<Spanned<LogicalExpr>, ParseError> {
+    let spanned_expr = expr(tokens)?;
+    let Span(start, mut end) = spanned_expr.span();
+    let mut lhs = Spanned(LogicalExpr::Factor(Box::new(spanned_expr)), Span(start, end));
+
+    while let LT | GT | LE | GE = peek(tokens)?.kind() {
+        match next(tokens)?.kind() {
+            LT => {
+                let spanned_rhs = expr(tokens)?;
+                let rhs_span = spanned_rhs.span();
+                end = rhs_span.end();
+                lhs = Spanned(
+                    LogicalExpr::LogicalOp {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(Spanned(
+                            LogicalExpr::Factor(
+                                Box::new(spanned_rhs)
+                            ),
+                            rhs_span
+                        )),
+                        op: LogicalOp::LT
+                    },
+                    Span(start, end)
+                )
+            },
+            GT => {
+                let spanned_rhs = expr(tokens)?;
+                let rhs_span = spanned_rhs.span();
+                end = rhs_span.end();
+                lhs = Spanned(
+                    LogicalExpr::LogicalOp {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(Spanned(
+                            LogicalExpr::Factor(
+                                Box::new(spanned_rhs)
+                            ),
+                            rhs_span
+                        )),
+                        op: LogicalOp::GT
+                    },
+                    Span(start, end)
+                )
+            },
+            LE => {
+                let spanned_rhs = expr(tokens)?;
+                let rhs_span = spanned_rhs.span();
+                end = rhs_span.end();
+                lhs = Spanned(
+                    LogicalExpr::LogicalOp {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(Spanned(
+                            LogicalExpr::Factor(
+                                Box::new(spanned_rhs)
+                            ),
+                            rhs_span
+                        )),
+                        op: LogicalOp::LE
+                    },
+                    Span(start, end)
+                )
+            },
+            GE => {
+                let spanned_rhs = expr(tokens)?;
+                let rhs_span = spanned_rhs.span();
+                end = rhs_span.end();
+                lhs = Spanned(
+                    LogicalExpr::LogicalOp {
+                        lhs: Box::new(lhs),
+                        rhs: Box::new(Spanned(
+                            LogicalExpr::Factor(
+                                Box::new(spanned_rhs)
+                            ),
+                            rhs_span
+                        )),
+                        op: LogicalOp::GE
+                    },
+                    Span(start, end)
+                )
+            },
+            _ => unreachable!()
+        }
+    }
+    Ok(lhs)
 }

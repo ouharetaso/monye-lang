@@ -1,21 +1,23 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, vec};
 use monye_syntax::{
     lexer::{
         PrimitiveType::{self, *},
         Span
     },
     parser::{
-        TypeName::{self, *},
-        Spanned,
-        Program,
         Declaration,
-        Statement,
         Expression,
+        LogicalExpr,
+        Program,
+        Spanned,
+        Statement,
+        TypeName::{self, *},
         UniOp,
+        LogicalOp::*
     }
 };
 use crate::instruction::{
-    BinOpExt, Instruction, OpCode::*
+    BinOpExt, Instruction, LogicalOpExt, OpCode::{self, *}
 };
 
 
@@ -325,17 +327,23 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
             } => {
                 let mut local_env = LocalEnv::new();
                 let mut constants = Vec::new();
+                let target_reg = Reg(0);
                 for (param, ty) in spanned_params {
                     local_env.add_variable(param.node(), ty.node());
                 }
 
-                let (insn_seq, ty) = translate_block(
+                let (mut insn_seq, ty) = translate_block(
                     &mut global_env,
                     Some(local_env),
                     &mut constants,
+                    target_reg,
                     spanned_body,
                     Some(spanned_ret_ty.node())
                 )?;
+
+                insn_seq.extend(vec![
+                    Instruction(Ret, target_reg.0, 0, 0)
+                ]);
 
                 match spanned_ret_ty.node().try_cast(&ty) {
                     Ok(_) => (),
@@ -375,6 +383,7 @@ fn translate_block(
     global_env: &mut GlobalEnv,
     local_env: Option<LocalEnv>,
     constants: &mut Vec<u64>,
+    target_reg: Reg,
     block: &Spanned<Vec<Spanned<Statement>>>,
     expected_ty: Option<&TypeName>
 ) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
@@ -446,7 +455,7 @@ fn translate_block(
 
     if let Some((ty, reg)) = last_expr_type_reg {
         result.push(Instruction(
-            Ret, reg.0, 0, 0
+            Mov, target_reg.0, reg.0, 0
         ));
         Ok((result, ty))
     }
@@ -659,7 +668,7 @@ fn translate_expr(
                         ]);
                         return Ok((result, ty.clone()))
                     },
-                    Primitive(prim_ty @ (U8 | U16 | U32 | U64)) => {
+                    Primitive(prim_ty @ _) => {
                         return Err(TranslateError(
                             ErrorKind::CannnotNegate(*prim_ty),
                             span
@@ -738,6 +747,231 @@ fn translate_expr(
             ]);
 
             Ok((result, ty.clone()))
+        },
+        Expression::Bool(b) => {
+            let mut result = Vec::new();
+            let const_index = add_const(constants, *b as u64);
+
+            let ty = match expected_ty {
+                Some(Primitive(Bool)) => Primitive(Bool),
+                None => Primitive(Bool),
+                Some(ty @ _) => return Err(TranslateError(
+                    ErrorKind::MismatchedTypes(Primitive(Bool), ty.clone()),
+                    span
+                ))
+            };
+            
+            result.extend(vec![
+                Instruction(Const, target_reg.0, const_index, 0)
+            ]);
+
+            Ok((result, ty))
+        },
+        Expression::If(
+            first,
+            else_ifs,
+            else_clause
+        ) => {
+            let mut result = Vec::<Instruction>::new();
+            let mut ty = expected_ty.cloned();
+
+            let main_branch = std::iter::once(first).chain(else_ifs)
+                .map(|spanned_if|{
+                    translate_logic_expr(
+                        global_env,
+                        local_env,
+                        constants,
+                        target_reg,
+                        spanned_if.node().cond(),
+                    )
+                    .and_then(|(cond, cond_ty)|{
+                        translate_block(
+                            global_env,
+                            Some(local_env.clone()),
+                            constants,
+                            target_reg,
+                            spanned_if.node().body(), 
+                            expected_ty
+                        )
+                        .map(|(body, body_ty)|{
+                            (cond, cond_ty, body, body_ty, spanned_if.span())
+                        })
+                    })
+                });
+
+            let mut branches = main_branch.collect::<Result<Vec<_>, _>>()?;
+
+            let else_branch = else_clause.as_ref().into_iter()
+                .map(|body|{
+                    let span = body.span();
+                    let const_index = add_const(constants, 1);
+                    let cond = vec![
+                        Instruction(Const, target_reg.0, const_index, 0)
+                    ];
+                    let cond_ty = Primitive(Bool);
+
+                    translate_block(
+                        global_env,
+                        Some(local_env.clone()),
+                        constants,
+                        target_reg,
+                        &body,
+                        expected_ty
+                    )
+                    .map(|(body, body_ty)|{
+                        (cond, cond_ty, body, body_ty, span)
+                    })
+                });
+            branches.extend(else_branch.collect::<Result<Vec<_>, _>>()?);
+                
+            for (cond, _cond_ty, body, body_ty, span) in branches {
+                let offset: i32 = body.len() as i32;
+                let b = (offset >> 16) as u16;
+                let c = (offset & 0xffff) as u16;
+
+                result.extend(cond);
+                result.extend(vec![
+                    Instruction(JumpNZ, target_reg.0, b, c)
+                ]);
+                result.extend(body);
+
+                ty  = ty
+                    .and_then(|ty|{
+                        if ty != body_ty {
+                            Some(Err(TranslateError(
+                                ErrorKind::MismatchedTypes(ty.clone(), body_ty.clone()),
+                                span
+                            )))
+                        }
+                        else {
+                            Some(Ok(ty))
+                        }
+                    })
+                    .or_else(|| Some(Ok(body_ty)))
+                    .transpose()?;
+            }
+            
+            // 流石にどっかで型決定してるだろ
+            Ok((result, ty.unwrap()))
+        }
+    }
+}
+
+
+fn translate_logic_expr(
+    global_env: &mut GlobalEnv,
+    local_env: &LocalEnv,
+    constants: &mut Vec<u64>,
+    target_reg: Reg,
+    spanned_expr: &Spanned<LogicalExpr>,
+) -> Result<(Vec<Instruction>, TypeName), TranslateError> {
+    let expr = spanned_expr.node();
+    let span = spanned_expr.span();
+
+    match expr {
+        LogicalExpr::Factor(expr) => {
+            let (insn_seq, ty) = translate_expr(
+                global_env,
+                local_env,
+                constants,
+                target_reg,
+                expr,
+                None
+            )?;
+
+            Ok((insn_seq, ty))
+        },
+        LogicalExpr::LogicalOp {
+            lhs,
+            rhs,
+            op
+        } => {
+            let mut result = Vec::new();
+            let lhs_target_reg = target_reg;
+            let rhs_target_reg = target_reg + 1;
+
+            let (lhs_result, lhs_ty) = translate_logic_expr(
+                global_env,
+                local_env,
+                constants,
+                lhs_target_reg,
+                lhs,
+            )?;
+            let (rhs_result, rhs_ty) = translate_logic_expr(
+                global_env,
+                local_env,
+                constants,
+                rhs_target_reg,
+                rhs,
+            )?;
+
+            result.extend(lhs_result);
+            result.extend(rhs_result);
+
+            let target_ty = lhs_ty.try_cast(&rhs_ty)
+                .map(|ty| 
+                    if ty == Primitive(Integer) {
+                        Primitive(DEFAULT_FALLBACK_TYPE)
+                    }
+                    else {
+                        ty
+                    }
+                )
+                .map_err(|e| TranslateError(e, span))?;
+
+            // target_ty shouldn't be Primitive(Integer) because of the fallback above
+            let result_ty = match (op, &target_ty) {
+                (LogicalAnd, Primitive(Bool)) => {
+                    result.extend(vec![
+                        Instruction(And, target_reg.0, target_reg.0, target_reg.0 + 1)
+                    ]);
+                    Primitive(Bool)
+                },
+                (LogicalOr, Primitive(Bool)) => {
+                    result.extend(vec![
+                        Instruction(Or, target_reg.0, target_reg.0, target_reg.0 + 1)
+                    ]);
+                    Primitive(Bool)
+                },
+                (LogicalAnd | LogicalOr, ty @ _) => {
+                    return Err(TranslateError(
+                        ErrorKind::MismatchedTypes(Primitive(Bool), ty.clone()),
+                        span
+                    ))
+                },
+                (LT | LE, Primitive(prim_ty @ _)) => {
+                    result.extend(vec![
+                        Instruction(op.to_typed_op(prim_ty.clone()).unwrap(), target_reg.0, lhs_target_reg.0, rhs_target_reg.0)
+                    ]);
+                    Primitive(Bool)
+                },
+                (GT, Primitive(prim_ty @ _)) => {
+                    result.extend(vec![
+                        Instruction(LT.to_typed_op(prim_ty.clone()).unwrap(), target_reg.0, rhs_target_reg.0, lhs_target_reg.0)
+                    ]);
+                    Primitive(Bool)
+                },
+                (GE, Primitive(prim_ty @ _)) => {
+                    result.extend(vec![
+                        Instruction(LE.to_typed_op(prim_ty.clone()).unwrap(), target_reg.0, rhs_target_reg.0, lhs_target_reg.0)
+                    ]);
+                    Primitive(Bool)
+                },
+                (Equal, _) => {
+                    result.extend(vec![
+                        Instruction(OpCode::EQ, target_reg.0, lhs_target_reg.0, rhs_target_reg.0)
+                    ]);
+                    Primitive(Bool)
+                },
+                (NotEqual, _) => {
+                    result.extend(vec![
+                        Instruction(OpCode::NE, target_reg.0, lhs_target_reg.0, rhs_target_reg.0)
+                    ]);
+                    Primitive(Bool)
+                },
+            };
+
+            Ok((result, result_ty))
         }
     }
 }

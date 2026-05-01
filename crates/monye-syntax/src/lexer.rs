@@ -64,6 +64,15 @@ pub enum TokenKind {
     Percent,
     Equal,
     Arrow,
+    DoubleEqual,
+    LT,
+    GT,
+    LE,
+    GE,
+    NE,
+    Exclamation,
+    DoubleAmpersand,
+    DoubleVbar,
     EOF
 }
 
@@ -78,18 +87,30 @@ impl PartialEq<TokenKind> for &TokenKind  {
 pub enum Keyword {
     Fn,
     Let,
+    If,
+    Else,
+    True,
+    False,
 }
 
 impl Keyword {
     const ALL: &'static [Keyword] = &[
-        Keyword::Fn,
-        Keyword::Let,
+        Self::Fn,
+        Self::Let,
+        Self::If,
+        Self::Else,
+        Self::True,
+        Self::False,
     ];
 
     fn as_str(&self) -> &'static str {
         match self {
-            Keyword::Fn => "fn",
-            Keyword::Let => "let",
+            Self::Fn => "fn",
+            Self::Let => "let",
+            Self::If => "if",
+            Self::Else => "else",
+            Self::True => "true",
+            Self::False => "false",
         }
     }
 }
@@ -119,32 +140,35 @@ pub enum PrimitiveType {
     U32,
     I64,
     U64,
-    Integer
+    Integer,
+    Bool,
 }
 
 impl PrimitiveType {
-    const ALL: &'static [PrimitiveType] = &[
-        PrimitiveType::I8,
-        PrimitiveType::U8,
-        PrimitiveType::I16,
-        PrimitiveType::U16,
-        PrimitiveType::I32,
-        PrimitiveType::U32,
-        PrimitiveType::I64,
-        PrimitiveType::U64,
+    const ALL: &'static [Self] = &[
+        Self::I8,
+        Self::U8,
+        Self::I16,
+        Self::U16,
+        Self::I32,
+        Self::U32,
+        Self::I64,
+        Self::U64,
+        Self::Bool,
     ];
 
     fn as_str(&self) -> &'static str {
         match self {
-            PrimitiveType::I8 => "i8",
-            PrimitiveType::U8 => "u8",
-            PrimitiveType::I16 => "i16",
-            PrimitiveType::U16 => "u16",
-            PrimitiveType::I32 => "i32",
-            PrimitiveType::U32 => "u32",
-            PrimitiveType::I64 => "i64",
-            PrimitiveType::U64 => "u64",
-            PrimitiveType::Integer => "integer"
+            Self::I8 => "i8",
+            Self::U8 => "u8",
+            Self::I16 => "i16",
+            Self::U16 => "u16",
+            Self::I32 => "i32",
+            Self::U32 => "u32",
+            Self::I64 => "i64",
+            Self::U64 => "u64",
+            Self::Integer => "integer",
+            Self::Bool => "bool",
         }
     }
 
@@ -236,13 +260,70 @@ impl<'a> StringLexer<'a> {
                 '.' => TokenKind::Dot,
                 ':' => TokenKind::Colon,
                 ';' => TokenKind::Semicolon,
-                '&' => TokenKind::Ampersand,
-                '|' => TokenKind::VBar,
+                '&' => {
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '&')) => {
+                            self.char_indices.next();
+                            len += '&'.len_utf8();
+                            TokenKind::DoubleAmpersand
+                        },
+                        _ => TokenKind::Ampersand
+                    }
+                },
+                '|' => {
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '|')) => {
+                            self.char_indices.next();
+                            len += '|'.len_utf8();
+                            TokenKind::DoubleVbar
+                        },
+                        _ => TokenKind::VBar
+                    }
+                },
                 '+' => TokenKind::Plus,
                 '*' => TokenKind::Asterisk,
                 '/' => TokenKind::Slash,
                 '%' => TokenKind::Percent,
-                '=' => TokenKind::Equal,
+                '=' => {
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '=')) => {
+                            self.char_indices.next();
+                            len += '='.len_utf8();
+                            TokenKind::DoubleEqual
+                        },
+                        _ => TokenKind::Equal
+                    }
+                },
+                '<' => {
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '=')) => {
+                            self.char_indices.next();
+                            len += '='.len_utf8();
+                            TokenKind::LE
+                        },
+                        _ => TokenKind::LT
+                    }
+                }
+                '>' => {
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '=')) => {
+                            self.char_indices.next();
+                            len += '='.len_utf8();
+                            TokenKind::GE
+                        },
+                        _ => TokenKind::GT
+                    }
+                },
+                '!' => {
+                    match self.char_indices.peek() {
+                        Some(&(_ii, '=')) => {
+                            self.char_indices.next();
+                            len += '='.len_utf8();
+                            TokenKind::NE
+                        },
+                        _ => TokenKind::Exclamation
+                    }
+                },                
                 '-' => {
                     match self.char_indices.peek() {
                         Some(&(_ii, '>')) => {

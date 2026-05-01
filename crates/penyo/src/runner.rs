@@ -166,6 +166,7 @@ fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, Runt
             NegI8  | NegI16 | NegI32 | NegI64 => {
                 registers[a] = (!registers[b]) + 1
             },
+            _ => unimplemented!()
         }
 
         pc += 1;

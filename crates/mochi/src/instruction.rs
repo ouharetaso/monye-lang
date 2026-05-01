@@ -1,5 +1,6 @@
 use monye_syntax::lexer::PrimitiveType::{self, *};
 use monye_syntax::parser::BinOp::{self, *};
+use monye_syntax::parser::LogicalOp::{self, *};
 
 
 #[repr(C)]
@@ -19,7 +20,11 @@ pub enum OpCode {
     Mov    = 0x0002,
     FnCall = 0xF000,
     Ret    = 0xF001,
+    Jump   = 0xF002,
+    JumpZ  = 0xF003,
+    JumpNZ = 0xF004,
 
+    // arithmetic operation
     AddU8  = 0x0100,
     AddI8  = 0x0101,
     AddU16 = 0x0102,
@@ -64,21 +69,45 @@ pub enum OpCode {
     NegI16 = 0x0129,
     NegI32 = 0x012A,
     NegI64 = 0x012B,
+    Inv    = 0x012C,
+    And    = 0x012D,
+    Or     = 0x012E,
+    Xor    = 0x012F,
     
+    // comparison
+    LTI8   = 0x0200,
+    LTI16  = 0x0201,
+    LTI32  = 0x0202,
+    LTI64  = 0x0203,
+    LEI8   = 0x0204,
+    LEI16  = 0x0205,
+    LEI32  = 0x0206,
+    LEI64  = 0x0207,
+    LTU8   = 0x0208,
+    LTU16  = 0x0209,
+    LTU32  = 0x020A,
+    LTU64  = 0x020B,
+    LEU8   = 0x020C,
+    LEU16  = 0x020D,
+    LEU32  = 0x020E,
+    LEU64  = 0x020F,
+    EQ     = 0x0220,
+    NE     = 0x0221,
 }
 
 
 impl Instruction {
     pub fn max_reg_index(&self) -> Option<u16> {
         match self.0 {
-            OpCode::Nop => None,
+            OpCode::Nop    | OpCode::Jump=> None,
             // 1 operand instruction
-            OpCode::Const  | OpCode::Ret    => {
+            OpCode::Const  | OpCode::Ret    | OpCode::JumpZ  | OpCode::JumpNZ=> {
                 Some(self.1)
             },
             // 2 operand instruction
             OpCode::NegI8  | OpCode::NegI16 | OpCode::NegI32 | OpCode::NegI64 |
-            OpCode::Mov => {
+            OpCode::Mov    | OpCode::Inv
+            => {
                 Some(self.1.max(self.2))
             },
             // 3 operand instruction
@@ -91,7 +120,13 @@ impl Instruction {
             OpCode::DivU8  | OpCode::DivI8  | OpCode::DivU16 | OpCode::DivI16 |
             OpCode::DivU32 | OpCode::DivI32 | OpCode::DivU64 | OpCode::DivI64 |
             OpCode::RemU8  | OpCode::RemI8  | OpCode::RemU16 | OpCode::RemI16 |
-            OpCode::RemU32 | OpCode::RemI32 | OpCode::RemU64 | OpCode::RemI64
+            OpCode::RemU32 | OpCode::RemI32 | OpCode::RemU64 | OpCode::RemI64 |
+            OpCode::LTI8   | OpCode::LTI16  | OpCode::LTI32  | OpCode::LTI64  |
+            OpCode::LEI8   | OpCode::LEI16  | OpCode::LEI32  | OpCode::LEI64  |
+            OpCode::LTU8   | OpCode::LTU16  | OpCode::LTU32  | OpCode::LTU64  |
+            OpCode::LEU8   | OpCode::LEU16  | OpCode::LEU32  | OpCode::LEU64  |
+            OpCode::EQ     | OpCode::NE     | OpCode::And    | OpCode::Or     |
+            OpCode::Xor
             => {
                 Some(self.1.max(self.2).max(self.3))
             },
@@ -153,6 +188,44 @@ impl BinOpExt for BinOp {
             (Rem, U64) => Some(OpCode::RemU64),
             (Rem, I64) => Some(OpCode::RemI64),
             _ => None,
+        }
+    }
+}
+
+
+pub trait LogicalOpExt {
+    fn to_typed_op(&self, ty: PrimitiveType) -> Option<OpCode>;
+}
+
+
+impl LogicalOpExt for LogicalOp {
+    fn to_typed_op(&self, ty: PrimitiveType) -> Option<OpCode> {
+        match (self, ty) {
+            (LogicalAnd, Bool) => Some(OpCode::And),
+            (LogicalAnd, _) => None,
+            (LogicalOr, Bool) => Some(OpCode::Or),
+            (LogicalOr, _) => None,
+            (LT, Bool) => Some(OpCode::LTU8),
+            (LT, I8) => Some(OpCode::LTI8),
+            (LT, I16) => Some(OpCode::LTI16),
+            (LT, I32) => Some(OpCode::LTI32),
+            (LT, I64) => Some(OpCode::LTI64),
+            (LT, U8) => Some(OpCode::LTU8),
+            (LT, U16) => Some(OpCode::LTU16),
+            (LT, U32) => Some(OpCode::LTU32),
+            (LT, U64) => Some(OpCode::LTU64),
+            (LE, Bool) => Some(OpCode::LEU8),
+            (LE, I8) => Some(OpCode::LEI8),
+            (LE, I16) => Some(OpCode::LEI16),
+            (LE, I32) => Some(OpCode::LEI32),
+            (LE, I64) => Some(OpCode::LEI64),
+            (LE, U8) => Some(OpCode::LEU8),
+            (LE, U16) => Some(OpCode::LEU16),
+            (LE, U32) => Some(OpCode::LEU32),
+            (LE, U64) => Some(OpCode::LEU64),
+            (Equal, _) => Some(OpCode::EQ),
+            (NotEqual, _) => Some(OpCode::NE),
+            _ => None
         }
     }
 }

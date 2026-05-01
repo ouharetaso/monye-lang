@@ -36,7 +36,7 @@ fn square(a: i32) -> i32 {
     a * a
 }
 
-fn main() -> i32 {
+fn main() -> u32 {
     let a: i32 = 42;
     let b: i32 = 32767;
 

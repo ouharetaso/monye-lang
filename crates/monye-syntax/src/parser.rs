@@ -116,8 +116,6 @@ pub enum LogicalOp {
     GT,
     LE,
     GE,
-    NT,
-    NE
 }
 
 

@@ -823,17 +823,27 @@ fn translate_expr(
                     })
                 });
             branches.extend(else_branch.collect::<Result<Vec<_>, _>>()?);
-                
+            
+            let mut exit_jump_insn_indices = Vec::new();
+
             for (cond, _cond_ty, body, body_ty, span) in branches {
-                let offset: i32 = body.len() as i32;
+                // + 1 because append exit jump instruction after the body
+                let offset = (body.len() + 1) as i32;
                 let b = (offset >> 16) as u16;
                 let c = (offset & 0xffff) as u16;
 
                 result.extend(cond);
                 result.extend(vec![
-                    Instruction(JumpNZ, target_reg.0, b, c)
+                    Instruction(JumpZ, target_reg.0, b, c)
                 ]);
                 result.extend(body);
+
+                // temporary instruction
+                // to be rewirted to Jump instruction after this for-loop
+                result.extend(vec![
+                    Instruction(Nop, 0, 0, 0)
+                ]);
+                exit_jump_insn_indices.push(result.len() - 1);
 
                 ty  = ty
                     .and_then(|ty|{
@@ -849,6 +859,14 @@ fn translate_expr(
                     })
                     .or_else(|| Some(Ok(body_ty)))
                     .transpose()?;
+            }
+
+            for index in exit_jump_insn_indices {
+                let offset = (result.len() - index - 1) as i32;
+                let b = (offset >> 16) as u16;
+                let c = (offset & 0xffff) as u16;
+
+                result[index] = Instruction(Jump, 0, b, c);
             }
             
             // 流石にどっかで型決定してるだろ

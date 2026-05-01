@@ -86,14 +86,14 @@ fn main() -> u32 {
         }
         println!("    ]");
         println!("    consts: [");
-        for constant in &function.constants {
-            println!("        {},", constant);
+        for (i, constant) in function.constants.iter().enumerate() {
+            println!("        {:>3}: {},", i, constant);
         }
         println!("    ]");
         println!("    return type: {:?}", function.signature.ret_ty());
         println!("    code [");
-        for insn in &function.code {
-            println!("        {:?},", insn);
+        for (i, insn) in function.code.iter().enumerate() {
+            println!("        {:>3}: {:?},", i, insn);
         }
         println!("    ],");
     }

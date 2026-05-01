@@ -36,7 +36,7 @@ fn square(a: i32) -> i32 {
     a * a
 }
 
-fn main() -> i32 {
+fn main() -> u32 {
     let a: i32 = 42;
     let b: i32 = 32767;
 
@@ -86,14 +86,14 @@ fn main() -> i32 {
         }
         println!("    ]");
         println!("    consts: [");
-        for constant in &function.constants {
-            println!("        {},", constant);
+        for (i, constant) in function.constants.iter().enumerate() {
+            println!("        {:>3}: {},", i, constant);
         }
         println!("    ]");
         println!("    return type: {:?}", function.signature.ret_ty());
         println!("    code [");
-        for insn in &function.code {
-            println!("        {:?},", insn);
+        for (i, insn) in function.code.iter().enumerate() {
+            println!("        {:>3}: {:?},", i, insn);
         }
         println!("    ],");
     }

@@ -40,33 +40,71 @@ pub fn run(mochi: &Mochi) -> Result<(), RuntimeError> {
 }
 
 
-fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, RuntimeError> {
-    let func = &mochi.functions[func_id.0 as usize];
-    let constants = &func.constants;
-    
-    let mut registers = args;
-    registers.resize(func.register_count as usize, 0);
+struct StackFrame<'f> {
+    pub func: &'f Function,
+    pub pc: usize,
+    pub registers: Vec<u64>,
+    pub dst: u16,
+}
 
-    let mut pc = 0usize;
+
+impl<'f> StackFrame<'f> {
+    fn new(func: &'f Function, pc: usize, mut registers: Vec<u64>, dst: u16) -> Self {
+        registers.resize(func.register_count as usize, 0);
+        Self { func, pc, registers, dst }
+    }
+}
+
+
+fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, RuntimeError> {
+    let entry_func = &mochi.functions[func_id.0 as usize];
+    let mut stack = Vec::new();
+
+    stack.push(StackFrame::new(entry_func, 0, args, 0));
 
     loop {
-        let insn = &func.code.get(pc).ok_or(RuntimeError::PcExceeded)?;
-        let opcode = insn.0;        
+        let frame = stack.last_mut().unwrap();
+        let pc = &mut frame.pc;
+        let func = frame.func;
+        let insn = func.code.get(*pc).ok_or(RuntimeError::PcExceeded)?;
+        let constants = &func.constants;
+        #[allow(unused_mut)]
+        let mut registers = &mut frame.registers;
+        let opcode = insn.0;
         let a = insn.1 as usize;
         let b = insn.2 as usize;
         let c = insn.3 as usize;
+
+        // eprintln!("{:?}", registers);
+        // eprintln!("in \"{}\", pc: {}, insn: {:?}", func.name, pc, insn);
 
         match opcode {
             Nop    => (),
             Const  => registers[a] = constants[b],
             Mov    => registers[a] = registers[b],
-            Ret    => return Ok(registers[a]),
+            Ret    => {
+                let result = registers[a];
+                let current_frame = stack.pop().unwrap();
+                let dst = current_frame.dst;
+
+                match stack.last_mut() {
+                    None => return Ok(result),
+                    Some(frame) => {
+                        frame.registers[dst as usize] = result;
+                    }
+                }
+                continue;
+            }
             FnCall => {
-                let func_id = FuncId(insn.1);
-                let _dst = b;
+                let func = &mochi.functions[a];
+                let dest = b as u16;
                 let argc = c;
                 let args = registers[(b+1)..(b+1+argc)].to_vec();
-                registers[b] = eval_func(mochi, func_id, args)?;
+
+                let frame = StackFrame::new(func, 0, args, dest);
+                *pc += 1;
+                stack.push(frame);
+                continue;
             },
             AddI8  | AddI16 | AddI32 | AddI64 |
             AddU8  | AddU16 | AddU32 | AddU64
@@ -166,9 +204,99 @@ fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, Runt
             NegI8  | NegI16 | NegI32 | NegI64 => {
                 registers[a] = (!registers[b]) + 1
             },
-            _ => unimplemented!()
+            Jump => {
+                let offset = ((b as i32) << 16) + c as i32;
+                *pc = (*pc + 1).strict_add_signed(offset as isize);
+                continue;
+            },
+            JumpZ => {
+                let offset = ((b as i32) << 16) + c as i32;
+                *pc = if registers[a] == 0 {
+                    (*pc + 1).strict_add_signed(offset as isize)
+                }
+                else {
+                    *pc + 1
+                };
+                continue;
+            },
+            JumpNZ => {
+                let offset = ((b as i32) << 16) + c as i32;
+                *pc = if registers[a] != 0 {
+                    (*pc + 1).strict_add_signed(offset as isize)
+                }
+                else {
+                    *pc + 1
+                };
+                continue;
+            },
+            EQ => {
+                registers[a] = (registers[b] == registers[c]) as u64;
+            },
+            NE => {
+                registers[a] = (registers[b] != registers[c]) as u64;
+            },
+            Inv => {
+                registers[a] = !registers[b];
+            },
+            And => {
+                registers[a] = registers[b] & registers[c];
+            },
+            Or => {
+                registers[a] = registers[b] | registers[c];
+            },
+            Xor => {
+                registers[a] = registers[b] ^ registers[c];
+            },
+            LTI8 => {
+                registers[a] = ((registers[b] as i8)  < (registers[c] as i8))  as u64;
+            },
+            LTI16 => {
+                registers[a] = ((registers[b] as i16) < (registers[c] as i16)) as u64;
+            },
+            LTI32 => {
+                registers[a] = ((registers[b] as i32) < (registers[c] as i32)) as u64;
+            },
+            LTI64 => {
+                registers[a] = ((registers[b] as i64) < (registers[c] as i64)) as u64;
+            },
+            LTU8 => {
+                registers[a] = ((registers[b] as u8)  < (registers[c] as u8))  as u64;
+            },
+            LTU16 => {
+                registers[a] = ((registers[b] as u16) < (registers[c] as u16)) as u64;
+            },
+            LTU32 => {
+                registers[a] = ((registers[b] as u32) < (registers[c] as u32)) as u64;
+            },
+            LTU64 => {
+                registers[a] = ((registers[b] as u64) < (registers[c] as u64)) as u64;
+            },
+            LEI8 => {
+                registers[a] = ((registers[b] as i8)  <= (registers[c] as i8))  as u64;
+            },
+            LEI16 => {
+                registers[a] = ((registers[b] as i16) <= (registers[c] as i16)) as u64;
+            },
+            LEI32 => {
+                registers[a] = ((registers[b] as i32) <= (registers[c] as i32)) as u64;
+            },
+            LEI64 => {
+                registers[a] = ((registers[b] as i64) <= (registers[c] as i64)) as u64;
+            },
+            LEU8 => {
+                registers[a] = ((registers[b] as u8)  <= (registers[c] as u8))  as u64;
+            },
+            LEU16 => {
+                registers[a] = ((registers[b] as u16) <= (registers[c] as u16)) as u64;
+            },
+            LEU32 => {
+                registers[a] = ((registers[b] as u32) <= (registers[c] as u32)) as u64;
+            },
+            LEU64 => {
+                registers[a] = ((registers[b] as u64) <= (registers[c] as u64)) as u64;
+            },
         }
 
-        pc += 1;
+        *pc += 1;
     }
 }

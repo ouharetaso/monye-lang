@@ -84,6 +84,17 @@ pub enum Expression {
 pub struct IfExpr(pub Spanned<LogicalExpr>, pub Spanned<Vec<Spanned<Statement>>>);
 
 
+impl IfExpr {
+    pub fn cond(&self) -> &Spanned<LogicalExpr> {
+        &self.0
+    }
+
+    pub fn body(&self) -> &Spanned<Vec<Spanned<Statement>>> {
+        &self.1
+    }
+}
+
+
 #[derive(Clone, Debug)]
 pub enum LogicalExpr {
     Factor(Box<Spanned<Expression>>),
@@ -105,10 +116,7 @@ pub enum LogicalOp {
     GT,
     LE,
     GE,
-    NT,
-    NE
 }
-
 
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

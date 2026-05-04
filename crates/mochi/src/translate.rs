@@ -1,4 +1,6 @@
-use std::{collections::HashMap, vec};
+use std::{
+    collections::HashMap, ops::Deref, sync::LazyLock, vec
+};
 use monye_syntax::{
     lexer::{
         PrimitiveType::{self, *},
@@ -22,6 +24,23 @@ use crate::instruction::{
 
 
 const DEFAULT_FALLBACK_TYPE: PrimitiveType = I32;
+pub static HOST_FUNCTIONS: LazyLock<Vec<Function>> = LazyLock::new(|| {
+    let host_func_defs = vec![
+        ("putc", Signature{params: vec![Primitive(U32)], ret_ty: Primitive(U32)})
+    ];
+
+    host_func_defs.iter().enumerate()
+        .map(|(i, (name, signature))|{
+            Function::new(
+                name,
+                FuncId(i as u16),
+                signature,
+                Vec::new(),
+                Vec::new()
+            )
+        })
+        .collect()
+});
 
 
 #[derive(Debug)]
@@ -33,6 +52,10 @@ pub struct Mochi {
 
 impl Mochi {
     fn new(functions: Vec<Function>) -> Self {
+        let functions = HOST_FUNCTIONS.iter()
+            .chain(functions.iter())
+            .cloned()
+            .collect();
         Self {
             functions,
             entry_point: "main".to_string()
@@ -61,7 +84,7 @@ impl std::ops::Add<u16> for Reg {
 pub struct ConstId(pub u16);
 
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Function {
     pub name: String,
     pub func_id: FuncId,
@@ -125,8 +148,14 @@ struct GlobalEnv {
 
 impl GlobalEnv {
     fn new() -> Self {
+        let mut func_defs = Vec::new();
+
+        for host_func in HOST_FUNCTIONS.deref() {
+            func_defs.push((host_func.name.clone(), host_func.signature.clone()));
+        }
+
         Self {
-            func_defs: Vec::new(),
+            func_defs,
         }
     }
 

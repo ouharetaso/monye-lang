@@ -8,6 +8,7 @@ pub enum RuntimeError {
     NoEntryPoint,
     PcExceeded,
     DivisionError(i64, i64),
+    OutOfCharBounds(u32),
 }
 
 
@@ -17,6 +18,7 @@ impl std::fmt::Display for RuntimeError {
             Self::DivisionError(dividend, divisor) => write!(f, "divide error: {}, {}", dividend, divisor),
             Self::NoEntryPoint => write!(f, "no entry point"),
             Self::PcExceeded => write!(f, "PC exceeded"),
+            Self::OutOfCharBounds(n) => write!(f, "out out char bounds: 0x{:8x}", n)
         }
     }
 }
@@ -34,7 +36,7 @@ pub fn run(mochi: &Mochi) -> Result<(), RuntimeError> {
 
     let result = eval_func(mochi, entry_func.func_id, args)?;
 
-    println!("{}", result);
+    // println!("{}", result);
 
     Ok(())
 }
@@ -75,9 +77,6 @@ fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, Runt
         let b = insn.2 as usize;
         let c = insn.3 as usize;
 
-        // eprintln!("{:?}", registers);
-        // eprintln!("in \"{}\", pc: {}, insn: {:?}", func.name, pc, insn);
-
         match opcode {
             Nop    => (),
             Const  => registers[a] = constants[b],
@@ -97,6 +96,21 @@ fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, Runt
             }
             FnCall => {
                 let func = &mochi.functions[a];
+
+                if let Some(f) = HOST_FUNCTIONS.iter()
+                    .find(|f|f.func_id.0 == a as u16)
+                {
+                    match f.func_id.0 {
+                        0x0000 => {
+                            print!("{}", char::from_u32(registers[b+1] as u32)
+                                .ok_or(RuntimeError::OutOfCharBounds(registers[b] as u32))?)
+                        },
+                        _ => unimplemented!("no such a host function")
+                    }
+                    *pc += 1;
+                    continue;
+                }
+
                 let dest = b as u16;
                 let argc = c;
                 let args = registers[(b+1)..(b+1+argc)].to_vec();

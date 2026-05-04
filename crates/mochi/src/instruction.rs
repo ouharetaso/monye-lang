@@ -4,7 +4,7 @@ use monye_syntax::parser::LogicalOp::{self, *};
 
 
 #[repr(C)]
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Instruction(
     pub OpCode,
     pub u16,

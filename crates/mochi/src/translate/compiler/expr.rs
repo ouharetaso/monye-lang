@@ -468,7 +468,11 @@ pub(crate) fn translate_expr(
             // there's no else clause
             else {
                 // it cannot happen that expr_ty isn't determined even when reached else clause
+                // when there's no else clause, type of main branch should be unit or never 
                 if let Unit | Never = expr_ty.clone().unwrap() {
+                    ()
+                }
+                else {
                     return Err(TranslateError(
                         ErrorKind::MismatchedTypes(Unit, expr_ty.unwrap()),
                         span

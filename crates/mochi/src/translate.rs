@@ -26,7 +26,7 @@ use crate::instruction::{
 const DEFAULT_FALLBACK_TYPE: PrimitiveType = I32;
 pub static HOST_FUNCTIONS: LazyLock<Vec<Function>> = LazyLock::new(|| {
     let host_func_defs = vec![
-        ("putc", Signature{params: vec![Primitive(U32)], ret_ty: Primitive(U32)})
+        ("putc", Signature{params: vec![Primitive(U32)], ret_ty: Unit})
     ];
 
     host_func_defs.iter().enumerate()
@@ -238,8 +238,8 @@ pub enum ErrorKind {
     UndefinedFunction(String),
     InvalidArgumentCount(usize, usize),
     InvalidArgumentType(TypeName, TypeName),
-    OperantionUndefined(TypeName),
-    CannnotNegate(PrimitiveType),
+    OperationUndefined(TypeName),
+    CannotNegate(PrimitiveType),
     NothingReturned,
 }
 
@@ -274,10 +274,10 @@ impl std::fmt::Display for TranslateError {
             ErrorKind::NothingReturned => {
                 write!(f, "nothing returned")
             },
-            ErrorKind::OperantionUndefined(ty) => {
+            ErrorKind::OperationUndefined(ty) => {
                 write!(f, "operation is undefined for {:?}", ty)
             }
-            ErrorKind::CannnotNegate(prim_ty) => {
+            ErrorKind::CannotNegate(prim_ty) => {
                 write!(f, "cannot negate type \"{:?}\"", prim_ty)
             }
         }
@@ -297,6 +297,12 @@ impl TypeNameExt for TypeName {
     #[allow(unreachable_patterns)]
     fn try_cast(&self, other: &Self) -> Result<Self, ErrorKind> {
         match (self, other) {
+            (expected, Never) => {
+                Ok(expected.clone())
+            },
+            (Never, actual) => {
+                Err(ErrorKind::MismatchedTypes(self.clone(), actual.clone()))
+            },
             (Primitive(lhs), Primitive(rhs)) => {
                 lhs.try_cast(rhs)
                     .map(|pt| Primitive(pt)).
@@ -420,6 +426,10 @@ fn translate_block(
     let mut local_env = local_env.unwrap_or(LocalEnv::new());
     let mut last_expr_type_reg = None as Option<(TypeName, Reg)>;
 
+    if block.node().is_empty() {
+        return Ok((Vec::new(), TypeName::Unit))
+    }
+
     for (is_last_statement, statement) in block.node()
         .iter().enumerate()
         .map(|(i, n)| (i == block.node().len() - 1, n))
@@ -479,6 +489,20 @@ fn translate_block(
                 result.extend(insn_seq);
                 last_expr_type_reg = Some((expr_type, target_reg))
             }
+            Statement::SemicolonnedExpr(spanned_expr) => {
+                let target_reg = local_env.available_reg();
+                let (insn_seq, _expr_type) = translate_expr(
+                    global_env,
+                    &local_env,
+                    constants,
+                    target_reg,
+                    spanned_expr,
+                    None
+                )?;
+
+                result.extend(insn_seq);
+                last_expr_type_reg = Some((TypeName::Unit, target_reg))
+            }
         }
     }
 
@@ -489,10 +513,7 @@ fn translate_block(
         Ok((result, ty))
     }
     else {
-        Err(TranslateError(
-            ErrorKind::NothingReturned,
-            block.span()
-        ))
+        Ok((result, Unit))
     }
 }
 
@@ -596,7 +617,7 @@ fn translate_expr(
                 unreachable!(); // 今のところ
                 #[allow(unreachable_code)]
                 return Err(TranslateError(
-                    ErrorKind::OperantionUndefined(expr_type),
+                    ErrorKind::OperationUndefined(expr_type),
                     span
                 ))
             };
@@ -699,10 +720,16 @@ fn translate_expr(
                     },
                     Primitive(prim_ty @ _) => {
                         return Err(TranslateError(
-                            ErrorKind::CannnotNegate(*prim_ty),
+                            ErrorKind::CannotNegate(*prim_ty),
                             span
                         ))
                     },
+                    ty @ (Unit | Never) => {
+                        return Err(TranslateError(
+                            ErrorKind::OperationUndefined(ty.clone()),
+                            span
+                        ))
+                    }
                 }
             }
 
@@ -731,7 +758,7 @@ fn translate_expr(
                 unreachable!(); // 今のところ
                 #[allow(unreachable_code)]
                 return Err(TranslateError(
-                    ErrorKind::OperantionUndefined(ty),
+                    ErrorKind::OperationUndefined(ty),
                     span
                 ))
             };
@@ -749,11 +776,11 @@ fn translate_expr(
                 (UniOp::Neg, I32) => NegI32,
                 (UniOp::Neg, I64) => NegI64,
                 (UniOp::Neg, U8| U16 | U32 | U64) => return Err(TranslateError(
-                    ErrorKind::CannnotNegate(ty),
+                    ErrorKind::CannotNegate(ty),
                     span
                 )),
                 (_, _) => return Err(TranslateError(
-                    ErrorKind::OperantionUndefined(Primitive(ty)),
+                    ErrorKind::OperationUndefined(Primitive(ty)),
                     span
                 ))
             };
@@ -796,13 +823,16 @@ fn translate_expr(
 
             Ok((result, ty))
         },
+        Expression::Unit => {
+            Ok((Vec::new(), TypeName::Unit))
+        },
         Expression::If(
             first,
             else_ifs,
             else_clause
         ) => {
             let mut result = Vec::<Instruction>::new();
-            let mut ty = expected_ty.cloned();
+            let mut expr_ty = expected_ty.cloned();
 
             let main_branch = std::iter::once(first).chain(else_ifs)
                 .map(|spanned_if|{
@@ -823,22 +853,23 @@ fn translate_expr(
                             expected_ty
                         )
                         .map(|(body, body_ty)|{
-                            (cond, cond_ty, body, body_ty, spanned_if.span())
+                            (
+                                cond,
+                                cond_ty,
+                                spanned_if.node().cond().span(),
+                                body,
+                                body_ty,
+                                spanned_if.span()
+                            )
                         })
                     })
                 });
 
             let mut branches = main_branch.collect::<Result<Vec<_>, _>>()?;
 
-            let else_branch = else_clause.as_ref().into_iter()
+            let else_branch = else_clause.clone()
                 .map(|body|{
                     let span = body.span();
-                    let const_index = add_const(constants, 1);
-                    let cond = vec![
-                        Instruction(Const, target_reg.0, const_index, 0)
-                    ];
-                    let cond_ty = Primitive(Bool);
-
                     translate_block(
                         global_env,
                         Some(local_env.clone()),
@@ -848,14 +879,18 @@ fn translate_expr(
                         expected_ty
                     )
                     .map(|(body, body_ty)|{
-                        (cond, cond_ty, body, body_ty, span)
+                        (body, body_ty, span)
                     })
-                });
-            branches.extend(else_branch.collect::<Result<Vec<_>, _>>()?);
-            
+                })
+                .transpose()?;
+                        
             let mut exit_jump_insn_indices = Vec::new();
 
-            for (cond, _cond_ty, body, body_ty, span) in branches {
+            for (cond, cond_ty, cond_span, body, body_ty, span) in branches {
+                if cond_ty != Primitive(Bool) {
+                    return Err(TranslateError(ErrorKind::MismatchedTypes(Primitive(Bool), cond_ty), cond_span));
+                }
+
                 // + 1 because append exit jump instruction after the body
                 let offset = (body.len() + 1) as i32;
                 let b = (offset >> 16) as u16;
@@ -874,20 +909,54 @@ fn translate_expr(
                 ]);
                 exit_jump_insn_indices.push(result.len() - 1);
 
-                ty  = ty
-                    .and_then(|ty|{
-                        if ty != body_ty {
-                            Some(Err(TranslateError(
-                                ErrorKind::MismatchedTypes(ty.clone(), body_ty.clone()),
-                                span
-                            )))
+                expr_ty  = match (expr_ty, body_ty) {
+                    (None, Never) => Some(Never),
+                    (None, ty) => Some(ty),
+
+                    (Some(current), Never) => Some(current),
+                    (Some(Never), ty) => Some(ty),
+                    (Some(current), body_ty) => {
+                        if current == body_ty {
+                            Some(current)
                         }
                         else {
-                            Some(Ok(ty))
+                            return Err(TranslateError(
+                                ErrorKind::MismatchedTypes(current, body_ty),
+                                span
+                            ))
                         }
-                    })
-                    .or_else(|| Some(Ok(body_ty)))
-                    .transpose()?;
+                    },
+                }
+            }
+
+            if let Some((body, body_ty, span)) = else_branch {
+                result.extend(body);
+
+                expr_ty = match (expr_ty, body_ty) {
+                    (Some(Never), ty) => Some(ty),
+                    (Some(current), body_ty) => {
+                        if current == body_ty {
+                            Some(current)
+                        }
+                        else {
+                            return Err(TranslateError(
+                                ErrorKind::MismatchedTypes(current, body_ty),
+                                span
+                            ))
+                        }
+                    },
+                    (None, _) => unreachable!()
+                }
+            }
+            // there's no else clause
+            else {
+                // it cannot happen that expr_ty isn't determined even when reached else clause
+                if let Unit | Never = expr_ty.clone().unwrap() {
+                    return Err(TranslateError(
+                        ErrorKind::MismatchedTypes(Unit, expr_ty.unwrap()),
+                        span
+                    ));
+                }
             }
 
             for index in exit_jump_insn_indices {
@@ -899,7 +968,7 @@ fn translate_expr(
             }
             
             // 流石にどっかで型決定してるだろ
-            Ok((result, ty.unwrap()))
+            Ok((result, expr_ty.unwrap()))
         }
     }
 }
@@ -1016,6 +1085,9 @@ fn translate_logic_expr(
                     ]);
                     Primitive(Bool)
                 },
+                (_, ty @ _) => {
+                    return Err(TranslateError(ErrorKind::OperationUndefined(ty.clone()), span))
+                }
             };
 
             Ok((result, result_ty))

@@ -91,6 +91,8 @@ pub enum Keyword {
     Else,
     True,
     False,
+    Unit,
+    Never,
 }
 
 impl Keyword {
@@ -101,6 +103,8 @@ impl Keyword {
         Self::Else,
         Self::True,
         Self::False,
+        Self::Unit,
+        Self::Never,
     ];
 
     fn as_str(&self) -> &'static str {
@@ -111,6 +115,8 @@ impl Keyword {
             Self::Else => "else",
             Self::True => "true",
             Self::False => "false",
+            Self::Unit => "unit",
+            Self::Never => "never",
         }
     }
 }

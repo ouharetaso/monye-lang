@@ -50,7 +50,8 @@ pub enum Statement {
         ty: Spanned<TypeName>,
         initializer: Option<Spanned<Expression>>
     },
-    Expression(Spanned<Expression>)
+    SemicolonnedExpr(Spanned<Expression>),
+    Expression(Spanned<Expression>),
 }
 
 
@@ -76,6 +77,7 @@ pub enum Expression {
     Number(u64),
     Value(Ident),
     Bool(bool),
+    Unit,
     If(Spanned<IfExpr>, Vec<Spanned<IfExpr>>, Option<Spanned<Vec<Spanned<Statement>>>>)
 }
 
@@ -122,6 +124,8 @@ pub enum LogicalOp {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TypeName {
     Primitive(PrimitiveType),
+    Unit,
+    Never,
     //UserDefined(Ident),
 }
 
@@ -205,16 +209,22 @@ pub fn parse(tokens: &mut VecDeque<Token>) -> Result<Program, ParseError> {
 
 
 fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
-    consume(tokens, Keyword(Fn))?;
+    let Span(start, _) = consume(tokens, Keyword(Fn))?;
     let name = match next(tokens)? {
         Token(Identifier(name), span) => Spanned(name, span),
         Token(_, span) => return Err(ParseError::UnexpectedToken(span))
     };
     consume(tokens, LParen)?;
     let params = param_list(tokens)?;
-    consume(tokens, RParen)?;
-    consume(tokens, Arrow)?;
-    let ret_ty = type_name(tokens)?;
+    let Span(_, end) = consume(tokens, RParen)?;
+
+    let ret_ty = if peek(tokens)?.kind() == Arrow {
+        consume(tokens, Arrow)?;
+        type_name(tokens)?
+    }
+    else {
+        Spanned(TypeName::Unit, Span(start, end))
+    };
     let body = block(tokens)?;
     
     Ok(Declaration::FnDecl{
@@ -276,6 +286,8 @@ fn typed_binding(tokens: &mut VecDeque<Token>) -> Result<(Spanned<Ident>, Spanne
 fn type_name(tokens: &mut VecDeque<Token>) -> Result<Spanned<TypeName>, ParseError> {
     match next(tokens)? {
         Token(Type(ty), span) => Ok(Spanned(TypeName::Primitive(ty), span)),
+        Token(Keyword(Unit), span) => Ok(Spanned(TypeName::Unit, span)),
+        Token(Keyword(Never), span) => Ok(Spanned(TypeName::Never, span)),
         //Identifier(ident) => Ok(TypeName::UserDefined(ident)),
         Token(_, span) => Err(ParseError::UnexpectedToken(span)),
     }
@@ -291,17 +303,12 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>
     loop {
         match peek(tokens)? {
             Token(
-                Keyword(Let) | LParen | Minus | Identifier(_) | Number(_) | Keyword(If),
+                Keyword(Let) | LParen | Minus | Identifier(_) | Number(_) | Keyword(If) |
+                Keyword(True) | Keyword(False) | Keyword(Unit),
                 _span
             ) => {
                 result.push(statement(tokens)?);
-                if peek(tokens)?.kind() == Semicolon {
-                    consume(tokens, Semicolon)?;
-                    continue;
-                }
-                else {
-                    break
-                }
+                continue;
             },
             Token(RBrace, _span) => break,
             Token(_, span) => return Err(ParseError::UnexpectedToken(span))
@@ -316,15 +323,29 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>
 
 fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseError> {
     match peek(tokens)? {
-        Token(Keyword(Let), _) => Ok(bind(tokens)?),
+        Token(Keyword(Let), _) => {
+            let bind = bind(tokens)?;
+            consume(tokens, Semicolon)?;
+            Ok(bind)
+        },
         Token(
-            Identifier(_) | Minus | Number(_) | LParen | Keyword(If),
+            LParen | Minus | Identifier(_) | Number(_) | Keyword(If) |
+            Keyword(True) | Keyword(False) | Keyword(Unit),
             span_start
         ) => {
             let spanned_expr = assign(tokens)?;
             let end = spanned_expr.span().end();
 
-            Ok(Spanned(Statement::Expression(spanned_expr), Span(span_start.start(), end)))
+            if peek(tokens)?.kind() == Semicolon {
+                let end = consume(tokens, Semicolon)?.end();
+                Ok(Spanned(
+                    Statement::SemicolonnedExpr(spanned_expr),
+                    Span(span_start.start(), end)
+                ))
+            }
+            else {
+                Ok(Spanned(Statement::Expression(spanned_expr), Span(span_start.start(), end)))
+            }
         },
         Token(_, span) => Err(ParseError::UnexpectedToken(span)),
     }
@@ -543,6 +564,13 @@ fn factor(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErro
                 span
             ))
         },
+        Token(Keyword(Unit), span) => {
+            consume(tokens, Keyword(Unit))?;
+            Ok(Spanned(
+                Expression::Unit,
+                span
+            ))
+        }
         Token(Keyword(If), _) => if_expr(tokens),
         Token(_, span) => Err(ParseError::UnexpectedToken(span))
     }
@@ -566,7 +594,8 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
         match peek(tokens)? {
             Token(RParen, _) => (),
             Token(
-                LParen | Number(_) | Identifier(_) | Minus | Keyword(If),
+                LParen | Number(_) | Identifier(_) | Minus | Keyword(If) |
+                Keyword(True| False | Unit),
                 _
             ) => {
                 args.push(expr(tokens)?);

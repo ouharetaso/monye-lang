@@ -13,6 +13,34 @@ pub struct Mochi {
 }
 
 
+impl std::fmt::Display for Mochi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "functions: [")?;
+        for function in &self.functions {
+            writeln!(f, "    name: {}", function.name)?;
+            writeln!(f, "    func_id: {:?}", function.func_id)?;
+            writeln!(f, "    params: [")?;
+            for param in function.signature.params() {
+                writeln!(f, "        {:?},", param)?;
+            }
+            writeln!(f, "    ]")?;
+            writeln!(f, "    consts: [")?;
+            for (i, constant) in function.constants.iter().enumerate() {
+                writeln!(f, "        {:>3}: {},", i, constant)?;
+            }
+            writeln!(f, "    ]")?;
+            writeln!(f, "    return type: {:?}", function.signature.ret_ty())?;
+            writeln!(f, "    code [")?;
+            for (i, insn) in function.code.iter().enumerate() {
+                writeln!(f, "        {:>3}: {:?},", i, insn)?;
+            }
+            writeln!(f, "    ],")?;
+        }
+        writeln!(f, "]")
+    }
+}
+
+
 impl Mochi {
     pub fn new(functions: Vec<Function>) -> Self {
         let functions = HOST_FUNCTIONS.iter()

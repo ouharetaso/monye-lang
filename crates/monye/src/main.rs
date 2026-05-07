@@ -2,7 +2,7 @@ use monye_syntax::{
     lexer::*,
     parser::*,
 };
-use mochi::translate::{Mochi, translate};
+use mochi::translate::translate;
 use penyo::runner::run;
 
 
@@ -18,32 +18,6 @@ fn print_error_range(program: &str, span: Span) {
             eprintln!("{}{}", " ".repeat(column), "^".repeat(span.1 - span.0));
         }
     }
-}
-
-
-fn print_mochi(mochi: &Mochi) {
-    println!("functions: [");
-    for function in &mochi.functions {
-        println!("    name: {}", function.name);
-        println!("    func_id: {:?}", function.func_id);
-        println!("    params: [");
-        for param in function.signature.params() {
-            println!("        {:?},", param);
-        }
-        println!("    ]");
-        println!("    consts: [");
-        for (i, constant) in function.constants.iter().enumerate() {
-            println!("        {:>3}: {},", i, constant);
-        }
-        println!("    ]");
-        println!("    return type: {:?}", function.signature.ret_ty());
-        println!("    code [");
-        for (i, insn) in function.code.iter().enumerate() {
-            println!("        {:>3}: {:?},", i, insn);
-        }
-        println!("    ],");
-    }
-    println!("]");
 }
 
 

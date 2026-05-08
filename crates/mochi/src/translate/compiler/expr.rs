@@ -183,12 +183,12 @@ pub(crate) fn translate_expr(
                     constants,
                     dest_reg,
                     &param,
-                    Some(param_type)
+                    None
                 )?;
                 match param_type.try_cast(&ty) {
                     Ok(_ty) => (),
-                    Err(e) => return Err(TranslateError(
-                        e,
+                    Err(_) => return Err(TranslateError(
+                        ErrorKind::InvalidArgumentType(param_type.clone(), ty),
                         span
                     )),
                 };

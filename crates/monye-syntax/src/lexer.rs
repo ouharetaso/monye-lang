@@ -178,11 +178,26 @@ impl PrimitiveType {
         }
     }
 
+    fn is_integer(&self) -> bool {
+        match self {
+            Self::I8 => true,
+            Self::U8 => true,
+            Self::I16 => true,
+            Self::U16 => true,
+            Self::I32 => true,
+            Self::U32 => true,
+            Self::I64 => true,
+            Self::U64 => true,
+            Self::Integer => true,
+            _ => false,
+        }
+    }
+
     pub fn try_cast(&self, other: &Self) -> Option<Self> {
         match (self, other) {
             (Self::Integer, Self::Integer) => Some(Self::Integer),
-            (Self::Integer, cast_to @ _) => Some(*cast_to),
-            (cast_to @ _, Self::Integer) => Some(*cast_to),
+            (Self::Integer, cast_to @ _) if cast_to.is_integer() => Some(*cast_to),
+            (cast_to @ _, Self::Integer) if cast_to.is_integer() => Some(*cast_to),
             (_, _) => if self == other {
                 Some(*self)
             }

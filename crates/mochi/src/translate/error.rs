@@ -7,7 +7,7 @@ use monye_syntax::{
 };
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TranslateError(pub(crate) ErrorKind, pub(crate) Span);
 
 
@@ -22,7 +22,7 @@ impl TranslateError {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ErrorKind {
     SyntaxError(SyntaxError),
     UndefinedVariable(String),
@@ -36,7 +36,7 @@ pub enum ErrorKind {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SyntaxError {
     InvalidAssignment
 }

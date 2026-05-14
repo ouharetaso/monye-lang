@@ -1,0 +1,7 @@
+[package]
+name = "mapyu"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+henyo.workspace = true

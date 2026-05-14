@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "henyo"
+version = "0.1.0"
+dependencies = [
+ "monye-syntax",
+]
+
+[[package]]
+name = "mapyu"
+version = "0.1.0"
+dependencies = [
+ "henyo",
+]
+
+[[package]]
 name = "mochi"
 version = "0.1.0"
 dependencies = [

@@ -32,8 +32,6 @@ mod tests {
         Declaration,
         Expression,
         IfExpr,
-        LogicalExpr,
-        LogicalOp,
         Spanned,
         Statement
     };
@@ -86,27 +84,6 @@ mod tests {
                 assert_eq!(expected, *n);
             }
             _ => panic!("expected number")
-        }
-    }
-
-    fn expect_logicalop<'a>(cond: &'a LogicalExpr, expected_op: LogicalOp) -> (&'a LogicalExpr, &'a LogicalExpr) {
-        match cond {
-            LogicalExpr::LogicalOp {
-                lhs,
-                rhs,
-                op
-            } => {
-                assert_eq!(expected_op, *op);
-                (lhs.node(), rhs.node())
-            },
-            _ => panic!("expected logical operation")
-        }
-    }
-
-    fn expect_logical_factor<'a>(cond: &'a LogicalExpr) -> &'a Expression {
-        match cond {
-            LogicalExpr::Factor(expr) => expr.node(),
-            _ => panic!("expected factor of logical operation")
         }
     }
 
@@ -305,27 +282,38 @@ mod tests {
         // depth-first
         // lhs1 = "1 >= 2 && 3 != 4"
         // rhs1 = "5 < 6"
-        let (lhs1, rhs1) = expect_logicalop(cond, LogicalOp::LogicalOr);
+        let (lhs1, rhs1) = expect_binop(cond, BinOp::LogicalOr);
         // lhs2 = "1 >= 2"
         // rhs2 = "3 != 4"
-        let (lhs2, rhs2) = expect_logicalop(lhs1, LogicalOp::LogicalAnd);
+        let (lhs2, rhs2) = expect_binop(lhs1, BinOp::LogicalAnd);
         // lhs3 = "1"
         // rhs3 = "2"
-        let (lhs3, rhs3) = expect_logicalop(lhs2, LogicalOp::GE);
-        expect_number(expect_logical_factor(lhs3), 1);
-        expect_number(expect_logical_factor(rhs3), 2);
+        let (lhs3, rhs3) = expect_binop(lhs2, BinOp::GE);
+        expect_number(lhs3, 1);
+        expect_number(rhs3, 2);
         // rhs2 = "3 != 4"
         // lhs4 = "3"
         // rhs4 = "4"
-        let (lhs4, rhs4) = expect_logicalop(rhs2, LogicalOp::NotEqual);
-        expect_number(expect_logical_factor(lhs4), 3);
-        expect_number(expect_logical_factor(rhs4), 4);
+        let (lhs4, rhs4) = expect_binop(rhs2, BinOp::NotEqual);
+        expect_number(lhs4, 3);
+        expect_number(rhs4, 4);
         // rhs1 = "5 < 6"
         // lhs5 = "5"
         // rhs5 = "6"
-        let (lhs5, rhs5) = expect_logicalop(rhs1, LogicalOp::LT);
-        expect_number(expect_logical_factor(lhs5), 5);
-        expect_number(expect_logical_factor(rhs5), 6);
+        let (lhs5, rhs5) = expect_binop(rhs1, BinOp::LT);
+        expect_number(lhs5, 5);
+        expect_number(rhs5, 6);
+    }
+
+    #[test]
+    fn parse_assign_rvalue() {
+        let _ = parse_success(r#"
+            fn main() {
+                let i32_value: i32 = 1;
+                let bool_value: bool = i32_value > 42;
+                let unit_value: unit = unit;
+            }
+        "#);
     }
 
     #[test]

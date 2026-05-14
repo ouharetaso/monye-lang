@@ -1,12 +1,11 @@
 
 
+use std::ops::Deref;
+
 use monye_syntax::{
     lexer::PrimitiveType::*,
     parser::{
-        Expression,
-        Spanned,
-        TypeName::{self, *},
-        UniOp,
+        BinOp, Expression, Spanned, TypeName::{self, *}, UniOp
     }
 };
 use crate::instruction::{
@@ -32,7 +31,6 @@ use crate::translate::typing::{
     TypeNameExt
 };
 use crate::translate::compiler::block::translate_block;
-use crate::translate::compiler::logic::translate_logic_expr;
 
 
 pub(crate) fn translate_expr(
@@ -100,6 +98,15 @@ pub(crate) fn translate_expr(
             rhs,
             op 
         } => {
+            // swap when op is GT or GE
+            // because mochi has only LT and LE, not GT or GE
+            let (lhs, rhs) = 
+            if let BinOp::GT | BinOp::GE = *op {
+                (rhs, lhs)
+            }
+            else {
+                (lhs, rhs)
+            };
             let mut result = Vec::new();
             let (lhs_result, lhs_type) = translate_expr(
                 global_env,
@@ -351,14 +358,15 @@ pub(crate) fn translate_expr(
             let mut result = Vec::<Instruction>::new();
             let mut expr_ty = expected_ty.cloned();
 
-            let main_branch = std::iter::once(first).chain(else_ifs)
+            let main_branch = std::iter::once(first.deref()).chain(else_ifs)
                 .map(|spanned_if|{
-                    translate_logic_expr(
+                    translate_expr(
                         global_env,
                         local_env,
                         constants,
                         target_reg,
                         spanned_if.node().cond(),
+                        Some(&Primitive(Bool))
                     )
                     .and_then(|(cond, cond_ty)|{
                         translate_block(
@@ -490,6 +498,6 @@ pub(crate) fn translate_expr(
             
             // 流石にどっかで型決定してるだろ
             Ok((result, expr_ty.unwrap()))
-        }
+        },
     }
 }

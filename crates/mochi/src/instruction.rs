@@ -1,6 +1,5 @@
 use monye_syntax::lexer::PrimitiveType::{self, *};
 use monye_syntax::parser::BinOp::{self, *};
-use monye_syntax::parser::LogicalOp::{self, *};
 
 
 #[repr(C)]
@@ -187,20 +186,6 @@ impl BinOpExt for BinOp {
             (Rem, I32) => Some(OpCode::RemI32),
             (Rem, U64) => Some(OpCode::RemU64),
             (Rem, I64) => Some(OpCode::RemI64),
-            _ => None,
-        }
-    }
-}
-
-
-pub trait LogicalOpExt {
-    fn to_typed_op(&self, ty: PrimitiveType) -> Option<OpCode>;
-}
-
-
-impl LogicalOpExt for LogicalOp {
-    fn to_typed_op(&self, ty: PrimitiveType) -> Option<OpCode> {
-        match (self, ty) {
             (LogicalAnd, Bool) => Some(OpCode::And),
             (LogicalAnd, _) => None,
             (LogicalOr, Bool) => Some(OpCode::Or),
@@ -223,9 +208,27 @@ impl LogicalOpExt for LogicalOp {
             (LE, U16) => Some(OpCode::LEU16),
             (LE, U32) => Some(OpCode::LEU32),
             (LE, U64) => Some(OpCode::LEU64),
+            (GT, Bool) => Some(OpCode::LTU8),
+            (GT, I8) => Some(OpCode::LTI8),
+            (GT, I16) => Some(OpCode::LTI16),
+            (GT, I32) => Some(OpCode::LTI32),
+            (GT, I64) => Some(OpCode::LTI64),
+            (GT, U8) => Some(OpCode::LTU8),
+            (GT, U16) => Some(OpCode::LTU16),
+            (GT, U32) => Some(OpCode::LTU32),
+            (GT, U64) => Some(OpCode::LTU64),
+            (GE, Bool) => Some(OpCode::LEU8),
+            (GE, I8) => Some(OpCode::LEI8),
+            (GE, I16) => Some(OpCode::LEI16),
+            (GE, I32) => Some(OpCode::LEI32),
+            (GE, I64) => Some(OpCode::LEI64),
+            (GE, U8) => Some(OpCode::LEU8),
+            (GE, U16) => Some(OpCode::LEU16),
+            (GE, U32) => Some(OpCode::LEU32),
+            (GE, U64) => Some(OpCode::LEU64),
             (Equal, _) => Some(OpCode::EQ),
             (NotEqual, _) => Some(OpCode::NE),
-            _ => None
+            _ => None,
         }
     }
 }

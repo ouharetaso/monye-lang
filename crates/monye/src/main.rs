@@ -57,7 +57,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
         }
     };
     
-    run(&mochi)?;
+    let result = run(&mochi)?;
+
+    println!("main() returned {}", result);
 
     Ok(())
 }

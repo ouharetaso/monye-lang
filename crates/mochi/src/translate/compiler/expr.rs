@@ -5,7 +5,7 @@ use std::ops::Deref;
 use monye_syntax::{
     lexer::PrimitiveType::*,
     parser::{
-        BinOp, Expression, Spanned, TypeName::{self, *}, UniOp
+        BinOp::*, Expression, Spanned, TypeName::{self, *}, UniOp
     }
 };
 use crate::instruction::{
@@ -101,7 +101,7 @@ pub(crate) fn translate_expr(
             // swap when op is GT or GE
             // because mochi has only LT and LE, not GT or GE
             let (lhs, rhs) = 
-            if let BinOp::GT | BinOp::GE = *op {
+            if let GT | GE = *op {
                 (rhs, lhs)
             }
             else {
@@ -128,9 +128,14 @@ pub(crate) fn translate_expr(
             result.extend(lhs_result);
             result.extend(rhs_result);
 
-            let expr_type = match lhs_type.try_cast(&rhs_type) {
-                Ok(ty) => ty,
-                Err(e) => return Err(TranslateError(
+            let expr_type = match (lhs_type.try_cast(&rhs_type), op) {
+                (Ok(ty), op) => {
+                    match op {
+                        GT | GE | LT | LE | Equal | NotEqual => Primitive(Bool),
+                        _ => ty
+                    }
+                },
+                (Err(e), _) => return Err(TranslateError(
                     e,
                     span
                 )),
@@ -153,8 +158,8 @@ pub(crate) fn translate_expr(
                 ty
             };
 
-            // 多分どの場合でも変換できる
-            let op = op.to_typed_op(ty).unwrap();
+            let op = op.to_typed_op(ty)
+                .ok_or(TranslateError(ErrorKind::OperationUndefined(Primitive(ty)), span))?;
 
             result.extend(vec![
                 Instruction(op, target_reg.0, target_reg.0, target_reg.0 + 1)

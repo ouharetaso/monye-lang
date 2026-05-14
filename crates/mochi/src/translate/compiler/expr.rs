@@ -504,5 +504,26 @@ pub(crate) fn translate_expr(
             // 流石にどっかで型決定してるだろ
             Ok((result, expr_ty.unwrap()))
         },
+        Expression::Block(block) => {
+            let mut result = Vec::<Instruction>::new();
+
+            let (insn_seq, block_ty) = translate_block(
+                global_env,
+                Some(local_env.clone()),
+                constants,
+                target_reg,
+                block,
+                expected_ty
+            )?;
+
+            result.extend(insn_seq);
+
+            if let Some(expected) = expected_ty
+            && expected != &block_ty{
+                return Err(TranslateError(ErrorKind::MismatchedTypes(expected.clone(), block_ty), span))
+            }
+
+            Ok((result, block_ty))
+        },
     }
 }

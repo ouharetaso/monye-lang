@@ -317,6 +317,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_block_rvalue() {
+        let _ = parse_success(r#"
+            fn main() {
+                let a: i32 = {
+                    let a: i32 = 42;
+                    a + 1
+                };
+
+                let unit_value: unit = {
+                    1 + 2;
+                };
+            }
+        "#);
+    }
+
+    #[test]
     fn parse_err_unexpected_token() {
         let srcs = [
             r#"fn main(,) {}"#,

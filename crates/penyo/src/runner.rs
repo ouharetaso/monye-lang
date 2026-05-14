@@ -1,5 +1,6 @@
+use std::io::{Write, BufWriter};
 use mochi::instruction::{
-    OpCode::*,
+    OpCode::*
 };
 use mochi::translate::*;
 
@@ -9,6 +10,7 @@ pub enum RuntimeError {
     PcExceeded,
     DivisionError(i64, i64),
     OutOfCharBounds(u32),
+    WriteBufferFailed,
 }
 
 
@@ -18,7 +20,8 @@ impl std::fmt::Display for RuntimeError {
             Self::DivisionError(dividend, divisor) => write!(f, "divide error: {}, {}", dividend, divisor),
             Self::NoEntryPoint => write!(f, "no entry point"),
             Self::PcExceeded => write!(f, "PC exceeded"),
-            Self::OutOfCharBounds(n) => write!(f, "out out char bounds: 0x{:8x}", n)
+            Self::OutOfCharBounds(n) => write!(f, "out out char bounds: 0x{:8x}", n),
+            Self::WriteBufferFailed => write!(f, "failed writing buffer")
         }
     }
 }
@@ -27,18 +30,23 @@ impl std::fmt::Display for RuntimeError {
 impl std::error::Error for RuntimeError {}
 
 
-pub fn run(mochi: &Mochi) -> Result<(), RuntimeError> {
+pub fn run(mochi: &Mochi) -> Result<u64, RuntimeError> {
+    let stdout = std::io::stdout();
+    let lock = stdout.lock();
+    let mut writer = BufWriter::new(lock);
+
+    run_with_writer(mochi, &mut writer)
+}
+
+
+pub fn run_with_writer<W: Write>(mochi: &Mochi, writer: &mut W) -> Result<u64, RuntimeError> {
     let entry_func = mochi.functions.iter()
         .find(|func| func.name == mochi.entry_point)
         .ok_or(RuntimeError::NoEntryPoint)?;
 
     let args = Vec::new();
 
-    let result = eval_func(mochi, entry_func.func_id, args)?;
-
-    // println!("{}", result);
-
-    Ok(())
+    eval_func(mochi, entry_func.func_id, args, writer)
 }
 
 
@@ -58,7 +66,12 @@ impl<'f> StackFrame<'f> {
 }
 
 
-fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, RuntimeError> {
+fn eval_func<W: Write>(
+    mochi: &Mochi,
+    func_id: FuncId,
+    args: Vec<u64>,
+    writer: &mut W
+) -> Result<u64, RuntimeError> {
     let entry_func = &mochi.functions[func_id.0 as usize];
     let mut stack = Vec::new();
 
@@ -102,8 +115,9 @@ fn eval_func(mochi: &Mochi, func_id: FuncId, args: Vec<u64>) -> Result<u64, Runt
                 {
                     match f.func_id.0 {
                         0x0000 => {
-                            print!("{}", char::from_u32(registers[b+1] as u32)
-                                .ok_or(RuntimeError::OutOfCharBounds(registers[b] as u32))?)
+                            writer.write_all(format!("{}", char::from_u32(registers[b+1] as u32)
+                                .ok_or(RuntimeError::OutOfCharBounds(registers[b] as u32))?).as_bytes())
+                                .or_else(|_| Err(RuntimeError::WriteBufferFailed))?
                         },
                         _ => unimplemented!("no such a host function")
                     }

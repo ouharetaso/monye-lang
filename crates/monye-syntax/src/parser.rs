@@ -169,13 +169,23 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 
+fn unexpected_token<T>(token: Token) -> Result<T, ParseError> {
+    if token.kind() == EOF {
+        Err(ParseError::UnexpectedEOF)
+    }
+    else {
+        Err(ParseError::UnexpectedToken(token.span()))
+    }
+}
+
+
 fn consume(tokens: &mut VecDeque<Token>, expect: TokenKind) -> Result<Span, ParseError> {
-    if let Some(Token(actual, span)) = tokens.pop_front()  {
-        if expect == actual {
-            Ok(span)
+    if let Some(token @ Token(_, _)) = tokens.pop_front()  {
+        if &expect == token.kind() {
+            Ok(token.span())
         }
         else {
-            Err(ParseError::UnexpectedToken(span))
+            unexpected_token(token)
         }
     }
     else {
@@ -212,7 +222,7 @@ fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
     let Span(start, _) = consume(tokens, Keyword(Fn))?;
     let name = match next(tokens)? {
         Token(Identifier(name), span) => Spanned(name, span),
-        Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+        token @ _ => return unexpected_token(token)
     };
     consume(tokens, LParen)?;
     let params = param_list(tokens)?;
@@ -239,9 +249,9 @@ fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
 fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Spanned<Ident>, Spanned<TypeName>)>, ParseError> {
     let mut result = Vec::new();
     
-    let Token(kind, span) = peek(tokens)?;
+    let Token(kind, _) = peek(tokens)?;
     if kind == Comma {
-        return Err(ParseError::UnexpectedToken(span));
+        return unexpected_token(peek(tokens)?)
     }
 
     match peek(tokens)? {
@@ -249,21 +259,20 @@ fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Spanned<Ident>, Spann
             result.push(typed_binding(tokens)?);
         },
         Token(RParen, _) => return Ok(result),
-        Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+        token @ _ => return unexpected_token(token)
     }
 
     loop {
         match peek(tokens)? {
             Token(Comma, _) => consume(tokens, Comma)?,
             Token(RParen, _) => break,
-            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+            token @ _ => return unexpected_token(token)
         };
         match peek(tokens)? {
             Token(Identifier(_), _) => {
                 result.push(typed_binding(tokens)?);
             },
-            Token(RParen, _) => break,
-            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+            token @ _ => return unexpected_token(token)
         };
     }
     Ok(result)
@@ -271,10 +280,11 @@ fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Spanned<Ident>, Spann
 
 
 fn typed_binding(tokens: &mut VecDeque<Token>) -> Result<(Spanned<Ident>, Spanned<TypeName>), ParseError> {
-    let Token(kind, span) = next(tokens)?;
+    let token = next(tokens)?;
+    let Token(kind, span) = token.clone();
 
     let Identifier(name) = kind else {
-        return Err(ParseError::UnexpectedToken(span));
+        return unexpected_token(token)
     };
 
     consume(tokens, Colon)?;
@@ -289,7 +299,7 @@ fn type_name(tokens: &mut VecDeque<Token>) -> Result<Spanned<TypeName>, ParseErr
         Token(Keyword(Unit), span) => Ok(Spanned(TypeName::Unit, span)),
         Token(Keyword(Never), span) => Ok(Spanned(TypeName::Never, span)),
         //Identifier(ident) => Ok(TypeName::UserDefined(ident)),
-        Token(_, span) => Err(ParseError::UnexpectedToken(span)),
+        token @ _ => return unexpected_token(token),
     }
 }
 
@@ -311,7 +321,7 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>
                 continue;
             },
             Token(RBrace, _span) => break,
-            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+            token @ _ => return unexpected_token(token)
         }
     }
     let end = peek(tokens)?.span().end();
@@ -347,7 +357,7 @@ fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseEr
                 Ok(Spanned(Statement::Expression(spanned_expr), Span(span_start.start(), end)))
             }
         },
-        Token(_, span) => Err(ParseError::UnexpectedToken(span)),
+        token @ _ => return unexpected_token(token)
     }
 }
 
@@ -572,7 +582,7 @@ fn factor(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErro
             ))
         }
         Token(Keyword(If), _) => if_expr(tokens),
-        Token(_, span) => Err(ParseError::UnexpectedToken(span))
+        token @ _ => return unexpected_token(token)
     }
 }
 
@@ -588,7 +598,7 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
         let mut args = Vec::new();
         consume(tokens, LParen)?;
         if peek(tokens)?.kind() == Comma {
-            return Err(ParseError::UnexpectedToken(next(tokens)?.span()));
+            return unexpected_token(next(tokens)?);
         }
 
         match peek(tokens)? {
@@ -600,7 +610,7 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
             ) => {
                 args.push(expr(tokens)?);
             },
-            Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+            token @ _ => return unexpected_token(token)
         }
 
         loop {
@@ -611,7 +621,7 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
                     args.push(expr(tokens)?);
                     continue;
                 }
-                Token(_, span) => return Err(ParseError::UnexpectedToken(span))
+                token @ _ => return unexpected_token(token)
             }
         }
         let Span(_, end) = consume(tokens, RParen)?;
@@ -657,9 +667,10 @@ fn if_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
             LBrace => {
                 let body = block(tokens)?;
                 end = body.span().end();
-                else_clause = Some(body)
+                else_clause = Some(body);
+                break;
             },
-            _ => return Err(ParseError::UnexpectedToken(next(tokens)?.span()))
+            _ => return unexpected_token(next(tokens)?)
         }
     }
 

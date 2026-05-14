@@ -79,6 +79,7 @@ pub enum Expression {
     Bool(bool),
     Unit,
     If(Box<Spanned<IfExpr>>, Vec<Spanned<IfExpr>>, Option<Spanned<Vec<Spanned<Statement>>>>),
+    Block(Spanned<Vec<Spanned<Statement>>>)
 }
 
 
@@ -192,7 +193,7 @@ fn is_expr_first_token(token: &Token) -> bool {
     matches!(
         token.kind(),
         Number(_)   | Identifier(_) | LParen | Minus | Exclamation | 
-        Keyword(If | True | False | Unit)
+        Keyword(If | True | False | Unit) | LBrace
     )
 }
 
@@ -571,6 +572,11 @@ fn factor(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErro
             ))
         }
         Token(Keyword(If), _) => if_expr(tokens),
+        Token(LBrace, _) => {
+            let block = block(tokens)?;
+            let span = block.span();
+            Ok(Spanned(Expression::Block(block), span))
+        },
         token @ _ => return unexpected_token(token)
     }
 }

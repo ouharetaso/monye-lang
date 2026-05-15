@@ -69,7 +69,7 @@ pub(crate) fn translate_expr(
                 ));
             };
             let (lhs_type, assigned_to) = local_env.get_variable(assigned_to)
-                .ok_or(TranslateError(ErrorKind::UndefinedVariable(assigned_to.clone()), lhs.span()))?;
+                .ok_or(TranslateError(ErrorKind::UndefinedVariable(assigned_to.to_string()), lhs.span()))?;
             let (mut result, ref rhs_type) = translate_expr(
                 global_env,
                 local_env,
@@ -175,7 +175,7 @@ pub(crate) fn translate_expr(
             let arg_base = target_reg + 1;
             let (signature, func_id) = global_env.get_func(name)
                 .map(|(signature, func_id)| (signature.clone(), func_id))
-                .ok_or(TranslateError(ErrorKind::UndefinedFunction(name.clone()), span))?;
+                .ok_or(TranslateError(ErrorKind::UndefinedFunction(name.to_string()), span))?;
 
             let argc = signature.params().len() as u16;
             let ret_ty = signature.ret_ty().clone();
@@ -324,7 +324,7 @@ pub(crate) fn translate_expr(
             let mut result = Vec::new();
 
             let Some((ty, reg)) = local_env.get_variable(name) else {
-                return Err(TranslateError(ErrorKind::UndefinedVariable(name.clone()), span))
+                return Err(TranslateError(ErrorKind::UndefinedVariable(name.to_string()), span))
             };
 
             result.extend(vec![

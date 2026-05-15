@@ -11,7 +11,7 @@ use monye_syntax::{
 };
 
 
-fn parse_success(src: &str) -> Program {
+fn parse_success(src: &str) -> Program<'_> {
     let mut lexer = StringLexer::new(src);
     let mut tokens = lexer.lex().unwrap();
     parse(&mut tokens).unwrap()
@@ -37,21 +37,21 @@ mod tests {
     };
     use super::*;
 
-    fn expect_expr(stmt: &Statement) -> &Expression {
+    fn expect_expr<'a>(stmt: &'a Statement<'a>) -> &'a Expression<'a> {
         match stmt {
             Statement::Expression(Spanned(expr, _)) => expr,
             _ => panic!("expected expr")
         }
     }
 
-    fn expect_semicolonned_expr(stmt: &Statement) -> &Expression {
+    fn expect_semicolonned_expr<'a>(stmt: &'a Statement<'a>) -> &'a Expression<'a> {
         match stmt {
             Statement::SemicolonnedExpr(Spanned(expr, _)) => expr,
             _ => panic!("expected semicolonned expr")
         }
     }
 
-    fn expect_if_expr<'a>(expr: &'a Expression) -> (&'a IfExpr, &'a Vec<Spanned<IfExpr>>, &'a Option<Spanned<Vec<Spanned<Statement>>>>) {
+    fn expect_if_expr<'a>(expr: &'a Expression<'a>) -> (&'a IfExpr<'a>, &'a Vec<Spanned<IfExpr<'a>>>, &'a Option<Spanned<Vec<Spanned<Statement<'a>>>>>) {
         match expr {
             Expression::If(
                 if_clause,
@@ -64,7 +64,7 @@ mod tests {
         }
     }
 
-    fn expect_binop<'a>(expr: &'a Expression, expected_op: BinOp) -> (&'a Expression, &'a Expression) {
+    fn expect_binop<'a>(expr: &'a Expression<'a>, expected_op: BinOp) -> (&'a Expression<'a>, &'a Expression<'a>) {
         match expr {
             Expression::BinOp {
                 lhs,

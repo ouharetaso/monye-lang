@@ -10,7 +10,7 @@ use crate::lexer::{
 };
 
 
-type Ident = String;
+type Ident<'src> = &'src str;
 
 
 #[derive(Clone, Debug)]
@@ -29,70 +29,70 @@ impl<T: Clone> Spanned<T> {
 
 
 #[derive(Clone, Debug)]
-pub struct Program(pub Vec<Declaration>);
+pub struct Program<'src>(pub Vec<Declaration<'src>>);
 
 
 #[derive(Clone, Debug)]
-pub enum Declaration {
+pub enum Declaration<'src> {
     FnDecl{
-        name: Spanned<Ident>,
-        params: Vec<(Spanned<Ident>, Spanned<TypeName>)>,
+        name: Spanned<Ident<'src>>,
+        params: Vec<(Spanned<Ident<'src>>, Spanned<TypeName>)>,
         ret_ty: Spanned<TypeName>,
-        body: Spanned<Vec<Spanned<Statement>>>
+        body: Spanned<Vec<Spanned<Statement<'src>>>>
     }
 }
 
 
 #[derive(Clone, Debug)]
-pub enum Statement {
+pub enum Statement<'src> {
     Bind {
-        name: Spanned<Ident>,
+        name: Spanned<Ident<'src>>,
         ty: Spanned<TypeName>,
-        initializer: Option<Spanned<Expression>>
+        initializer: Option<Spanned<Expression<'src>>>
     },
-    SemicolonnedExpr(Spanned<Expression>),
-    Expression(Spanned<Expression>),
+    SemicolonnedExpr(Spanned<Expression<'src>>),
+    Expression(Spanned<Expression<'src>>),
 }
 
 
 #[derive(Clone, Debug)]
-pub enum Expression {
+pub enum Expression<'src> {
     Assign {
-        lhs: Box<Spanned<Expression>>,
-        expr: Box<Spanned<Expression>>
+        lhs: Box<Spanned<Expression<'src>>>,
+        expr: Box<Spanned<Expression<'src>>>
     },
     BinOp {
-        lhs: Box<Spanned<Expression>>,
-        rhs: Box<Spanned<Expression>>,
+        lhs: Box<Spanned<Expression<'src>>>,
+        rhs: Box<Spanned<Expression<'src>>>,
         op: BinOp
     },
     UniOp {
-        operand: Box<Spanned<Expression>>,
+        operand: Box<Spanned<Expression<'src>>>,
         op: UniOp
     },
     FnCall{
-        name: Ident,
-        args: Vec<Spanned<Expression>>
+        name: Ident<'src>,
+        args: Vec<Spanned<Expression<'src>>>
     },
     Number(u64),
-    Value(Ident),
+    Value(Ident<'src>),
     Bool(bool),
     Unit,
-    If(Box<Spanned<IfExpr>>, Vec<Spanned<IfExpr>>, Option<Spanned<Vec<Spanned<Statement>>>>),
-    Block(Spanned<Vec<Spanned<Statement>>>)
+    If(Box<Spanned<IfExpr<'src>>>, Vec<Spanned<IfExpr<'src>>>, Option<Spanned<Vec<Spanned<Statement<'src>>>>>),
+    Block(Spanned<Vec<Spanned<Statement<'src>>>>)
 }
 
 
 #[derive(Clone, Debug)]
-pub struct IfExpr(pub Spanned<Expression>, pub Spanned<Vec<Spanned<Statement>>>);
+pub struct IfExpr<'src>(pub Spanned<Expression<'src>>, pub Spanned<Vec<Spanned<Statement<'src>>>>);
 
 
-impl IfExpr {
-    pub fn cond(&self) -> &Spanned<Expression> {
+impl<'src> IfExpr<'src> {
+    pub fn cond(&self) -> &Spanned<Expression<'src>> {
         &self.0
     }
 
-    pub fn body(&self) -> &Spanned<Vec<Spanned<Statement>>> {
+    pub fn body(&self) -> &Spanned<Vec<Spanned<Statement<'src>>>> {
         &self.1
     }
 }
@@ -154,7 +154,7 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 
-fn unexpected_token<T>(token: Token) -> Result<T, ParseError> {
+fn unexpected_token<'src, T>(token: Token<'src>) -> Result<T, ParseError> {
     if token.kind() == EOF {
         Err(ParseError::UnexpectedEOF)
     }
@@ -164,7 +164,7 @@ fn unexpected_token<T>(token: Token) -> Result<T, ParseError> {
 }
 
 
-fn consume(tokens: &mut VecDeque<Token>, expect: TokenKind) -> Result<Span, ParseError> {
+fn consume<'src>(tokens: &mut VecDeque<Token<'src>>, expect: TokenKind<'src>) -> Result<Span, ParseError> {
     if let Some(token @ Token(_, _)) = tokens.pop_front()  {
         if &expect == token.kind() {
             Ok(token.span())
@@ -179,17 +179,17 @@ fn consume(tokens: &mut VecDeque<Token>, expect: TokenKind) -> Result<Span, Pars
 }
 
 
-fn next(tokens: &mut VecDeque<Token>) -> Result<Token, ParseError> {
+fn next<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Token<'src>, ParseError> {
     tokens.pop_front().ok_or(ParseError::UnexpectedEOF)
 }
 
 
-fn peek(tokens: &VecDeque<Token>) -> Result<Token, ParseError> {
+fn peek<'src>(tokens: &VecDeque<Token<'src>>) -> Result<Token<'src>, ParseError> {
     tokens.get(0).cloned().ok_or(ParseError::UnexpectedEOF)
 }
 
 
-fn is_expr_first_token(token: &Token) -> bool {
+fn is_expr_first_token<'src>(token: &Token<'src>) -> bool {
     matches!(
         token.kind(),
         Number(_)   | Identifier(_) | LParen | Minus | Exclamation | 
@@ -198,7 +198,7 @@ fn is_expr_first_token(token: &Token) -> bool {
 }
 
 
-pub fn parse(tokens: &mut VecDeque<Token>) -> Result<Program, ParseError> {
+pub fn parse<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Program<'src>, ParseError> {
     let mut program = Vec::new();
     loop {
         program.push(fn_decl(tokens)?);
@@ -212,7 +212,7 @@ pub fn parse(tokens: &mut VecDeque<Token>) -> Result<Program, ParseError> {
 }
 
 
-fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
+fn fn_decl<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Declaration<'src>, ParseError> {
     let Span(start, _) = consume(tokens, Keyword(Fn))?;
     let name = match next(tokens)? {
         Token(Identifier(name), span) => Spanned(name, span),
@@ -240,7 +240,7 @@ fn fn_decl(tokens: &mut VecDeque<Token>) -> Result<Declaration, ParseError> {
 }
 
 
-fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Spanned<Ident>, Spanned<TypeName>)>, ParseError> {
+fn param_list<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Vec<(Spanned<Ident<'src>>, Spanned<TypeName>)>, ParseError> {
     let mut result = Vec::new();
     
     let Token(kind, _) = peek(tokens)?;
@@ -273,7 +273,7 @@ fn param_list(tokens: &mut VecDeque<Token>) -> Result<Vec<(Spanned<Ident>, Spann
 }
 
 
-fn typed_binding(tokens: &mut VecDeque<Token>) -> Result<(Spanned<Ident>, Spanned<TypeName>), ParseError> {
+fn typed_binding<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<(Spanned<Ident<'src>>, Spanned<TypeName>), ParseError> {
     let token = next(tokens)?;
     let Token(kind, span) = token.clone();
 
@@ -287,7 +287,7 @@ fn typed_binding(tokens: &mut VecDeque<Token>) -> Result<(Spanned<Ident>, Spanne
 }
 
 
-fn type_name(tokens: &mut VecDeque<Token>) -> Result<Spanned<TypeName>, ParseError> {
+fn type_name<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<TypeName>, ParseError> {
     match next(tokens)? {
         Token(Type(ty), span) => Ok(Spanned(TypeName::Primitive(ty), span)),
         Token(Keyword(Unit), span) => Ok(Spanned(TypeName::Unit, span)),
@@ -298,7 +298,7 @@ fn type_name(tokens: &mut VecDeque<Token>) -> Result<Spanned<TypeName>, ParseErr
 }
 
 
-fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>>, ParseError> {
+fn block<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Vec<Spanned<Statement<'src>>>>, ParseError> {
     let mut result = Vec::new();
 
     let start = peek(tokens)?.span().start();
@@ -325,7 +325,7 @@ fn block(tokens: &mut VecDeque<Token>) -> Result<Spanned<Vec<Spanned<Statement>>
 }
 
 
-fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseError> {
+fn statement<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Statement<'src>>, ParseError> {
     match peek(tokens)? {
         Token(Keyword(Let), _) => {
             let bind = bind(tokens)?;
@@ -352,7 +352,7 @@ fn statement(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseEr
 }
 
 
-fn bind(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseError> {
+fn bind<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Statement<'src>>, ParseError> {
     let Span(start, _) = consume(tokens, Keyword(Let))?;
     let (name, ty) = typed_binding(tokens)?;
     let initializer = if peek(tokens)?.kind() == Equal {
@@ -381,12 +381,12 @@ fn bind(tokens: &mut VecDeque<Token>) -> Result<Spanned<Statement>, ParseError> 
 }
 
 
-fn expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn expr<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     assign(tokens)
 }
 
 
-fn assign(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn assign<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let spanned_lhs = logic_expr(tokens)?;
     let Span(start, _) = spanned_lhs.span();
 
@@ -408,13 +408,13 @@ fn assign(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErro
 }
 
 
-fn operation(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn operation<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     addition(tokens)
 }
 
 
 #[allow(unused_assignments)]
-fn addition(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn addition<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let mut lhs = multiply(tokens)?;
     let Span(start, mut end) = lhs.span();
 
@@ -453,7 +453,7 @@ fn addition(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
 }
 
 #[allow(unused_assignments)]
-fn multiply(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn multiply<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let mut lhs = unary_op(tokens)?;
     let Span(start, mut end) = lhs.span();
 
@@ -505,7 +505,7 @@ fn multiply(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
 }
 
 
-fn unary_op(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn unary_op<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     match peek(tokens)?.kind() {
         Minus => {
             let Span(start, _) = consume(tokens, Minus)?;
@@ -538,7 +538,7 @@ fn unary_op(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
 }
 
 
-fn factor(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn factor<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     match peek(tokens)? {
         Token(Number(n), _) => {
             let Token(_, span) = next(tokens)?;
@@ -582,7 +582,7 @@ fn factor(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErro
 }
 
 
-fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn fn_call<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let Token(kind, span) = next(tokens)?;
     let Identifier(ident) = kind else {
         return Err(ParseError::UnexpectedToken(span))
@@ -634,7 +634,7 @@ fn fn_call(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
 
 
 #[allow(unused_assignments)]
-fn if_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn if_expr<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let start = peek(tokens)?.span().start();
     consume(tokens, Keyword(If))?;
     let cond = logic_expr(tokens)?;
@@ -676,13 +676,13 @@ fn if_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseErr
 }
 
 
-fn logic_expr(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn logic_expr<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     logical_or(tokens)
 }
 
 
 #[allow(unused_assignments)]
-fn logical_or(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn logical_or<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let mut lhs = logical_and(tokens)?;
     let Span(start, mut end) = lhs.span();
 
@@ -704,7 +704,7 @@ fn logical_or(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, Parse
 
 
 #[allow(unused_assignments)]
-fn logical_and(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn logical_and<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let mut lhs = equality(tokens)?;
     let Span(start, mut end) = lhs.span();
 
@@ -726,7 +726,7 @@ fn logical_and(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, Pars
 
 
 #[allow(unused_assignments)]
-fn equality(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn equality<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let mut lhs = order(tokens)?;
     let Span(start, mut end) = lhs.span();
 
@@ -764,7 +764,7 @@ fn equality(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseEr
 
 
 #[allow(unused_assignments)]
-fn order(tokens: &mut VecDeque<Token>) -> Result<Spanned<Expression>, ParseError> {
+fn order<'src>(tokens: &mut VecDeque<Token<'src>>) -> Result<Spanned<Expression<'src>>, ParseError> {
     let spanned_expr = operation(tokens)?;
     let Span(start, mut end) = spanned_expr.span();
     let mut lhs = spanned_expr;

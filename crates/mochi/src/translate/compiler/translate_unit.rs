@@ -38,7 +38,7 @@ pub fn translate(ast: Program) -> Result<Mochi, TranslateError> {
                 ret_ty: spanned_ret_ty,
                 body: _ 
             } => {
-                let name = spanned_name.node().clone();
+                let name = spanned_name.node();
                 let signature = Signature::new(
                     &spanned_params.iter().map(|(_, ty)|{
                         ty.node().clone()

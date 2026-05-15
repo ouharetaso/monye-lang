@@ -3,8 +3,8 @@ use std::iter::Peekable;
 use std::collections::VecDeque;
 
 
-pub trait Lexer<'a> {
-    fn lex(&mut self) -> Result<VecDeque<Token>, LexError>;
+pub trait Lexer<'src> {
+    fn lex(&mut self) -> Result<VecDeque<Token<'src>>, LexError>;
 }
 
 
@@ -22,10 +22,10 @@ impl Span {
 }
 
 #[derive(Debug, Clone)]
-pub struct Token(pub TokenKind, pub Span);
+pub struct Token<'src>(pub TokenKind<'src>, pub Span);
 
-impl Token {
-    pub fn kind(&self) -> &TokenKind {
+impl<'src> Token<'src> {
+    pub fn kind(&self) -> &TokenKind<'src> {
         &self.0
     }
 
@@ -34,7 +34,7 @@ impl Token {
     }
 }
 
-impl PartialEq for Token {
+impl<'src> PartialEq for Token<'src> {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0
     }
@@ -42,10 +42,10 @@ impl PartialEq for Token {
 
 
 #[derive(PartialEq, Debug, Clone)]
-pub enum TokenKind {
+pub enum TokenKind<'src> {
     Number(u64),
     Keyword(Keyword),
-    Identifier(String),
+    Identifier(&'src str),
     Type(PrimitiveType),
     LParen,
     RParen,
@@ -76,7 +76,7 @@ pub enum TokenKind {
     EOF
 }
 
-impl PartialEq<TokenKind> for &TokenKind  {
+impl<'src> PartialEq<TokenKind<'src>> for &TokenKind<'src>  {
     fn eq(&self, other: &TokenKind) -> bool {
         <TokenKind as PartialEq>::eq(*self, other)
     }
@@ -245,19 +245,21 @@ impl std::fmt::Display for LexError {
 impl std::error::Error for LexError {}
 
 
-pub struct StringLexer<'a> {
-    char_indices: Peekable<CharIndices<'a>>
+pub struct StringLexer<'src> {
+    source: &'src str,
+    char_indices: Peekable<CharIndices<'src>>
 }
 
 
-impl<'a> StringLexer<'a> {
-    pub fn new(input: &'a str) -> Self {
+impl<'src> StringLexer<'src> {
+    pub fn new(input: &'src str) -> Self {
         Self {
+            source: input,
             char_indices: input.char_indices().peekable()
         }
     }
 
-    fn next_token(&mut self) -> Result<Token, LexError> {
+    fn next_token(&mut self) -> Result<Token<'src>, LexError> {
         while let Some(&(_i, c)) = self.char_indices.peek() {
             if c.is_ascii_whitespace() {
                 self.char_indices.next();
@@ -373,20 +375,22 @@ impl<'a> StringLexer<'a> {
                     TokenKind::Number(digits.parse().map_err(|_|LexError::ParseNumberError)?)
                 }
                 first @ ('a'..='z' | 'A'..='Z' | '_') => {
-                    let identifier = std::iter::successors(Some(first), |_|{
-                        self.char_indices.next_if(|&(_, c)| {
-                            c.is_alphanumeric() || c == '_'
+                    let end = std::iter::successors(Some(start + first.len_utf8()), |_|{
+                        self.char_indices.next_if(|(_, c)|{
+                            c.is_alphanumeric() || *c == '_'
                         })
-                        .map(|(_, c)| c)
+                        .map(|(i, c)| i + c.len_utf8())
                     })
-                    .collect::<String>();
+                    .last()
+                    .unwrap_or(start + first.len_utf8());
 
-                    len = identifier.len();
+                    let identifier = &self.source[start..end];
+                    len = end - start;
 
-                    if let Ok(keyword) = Keyword::from_str(&identifier) {
+                    if let Ok(keyword) = Keyword::from_str(identifier) {
                         TokenKind::Keyword(keyword)
                     }
-                    else if let Ok(ty) = PrimitiveType::from_str(&identifier) {
+                    else if let Ok(ty) = PrimitiveType::from_str(identifier) {
                         TokenKind::Type(ty)
                     } 
                     else {
@@ -405,8 +409,8 @@ impl<'a> StringLexer<'a> {
 }
 
 
-impl<'a> Lexer<'a> for StringLexer<'a> {
-    fn lex(&mut self) -> Result<VecDeque<Token>, LexError> {
+impl<'src> Lexer<'src> for StringLexer<'src> {
+    fn lex(&mut self) -> Result<VecDeque<Token<'src>>, LexError> {
         let mut result = VecDeque::new();
 
         loop {
@@ -430,7 +434,7 @@ impl<'a> Lexer<'a> for StringLexer<'a> {
 mod tests {
     use super::*;
 
-    fn get_token_kinds(input: &str) -> Result<Vec<TokenKind>, LexError> {
+    fn get_token_kinds<'src>(input: &'src str) -> Result<Vec<TokenKind<'src>>, LexError> {
         let mut lexer = StringLexer::new(input);
         lexer.lex().map(|tokens| tokens.into_iter().map(|t| t.0).collect())
     }
@@ -478,11 +482,11 @@ mod tests {
         let input = "fn main let i32 u64 _variable_name";
         let expect = vec![
             TokenKind::Keyword(Keyword::Fn),
-            TokenKind::Identifier("main".to_string()),
+            TokenKind::Identifier("main"),
             TokenKind::Keyword(Keyword::Let),
             TokenKind::Type(PrimitiveType::I32),
             TokenKind::Type(PrimitiveType::U64),
-            TokenKind::Identifier("_variable_name".to_string()),
+            TokenKind::Identifier("_variable_name"),
             TokenKind::EOF,
         ];
 
@@ -494,13 +498,13 @@ mod tests {
         let input = "fn add(a: i32, b: i32) -> i32 { let sum = a + b; sum }";
         let expect = vec![
             TokenKind::Keyword(Keyword::Fn),
-            TokenKind::Identifier("add".to_string()),
+            TokenKind::Identifier("add"),
             TokenKind::LParen,
-            TokenKind::Identifier("a".to_string()),
+            TokenKind::Identifier("a"),
             TokenKind::Colon,
             TokenKind::Type(PrimitiveType::I32),
             TokenKind::Comma,
-            TokenKind::Identifier("b".to_string()),
+            TokenKind::Identifier("b"),
             TokenKind::Colon,
             TokenKind::Type(PrimitiveType::I32),
             TokenKind::RParen,
@@ -508,13 +512,13 @@ mod tests {
             TokenKind::Type(PrimitiveType::I32),
             TokenKind::LBrace,
             TokenKind::Keyword(Keyword::Let),
-            TokenKind::Identifier("sum".to_string()),
+            TokenKind::Identifier("sum"),
             TokenKind::Equal,
-            TokenKind::Identifier("a".to_string()),
+            TokenKind::Identifier("a"),
             TokenKind::Plus,
-            TokenKind::Identifier("b".to_string()),
+            TokenKind::Identifier("b"),
             TokenKind::Semicolon,
-            TokenKind::Identifier("sum".to_string()),
+            TokenKind::Identifier("sum"),
             TokenKind::RBrace,
             TokenKind::EOF,
         ];
